@@ -3124,6 +3124,16 @@ tr[data-status="not_evaluated"] .lab-check-status {
 .wb-modules-panel[hidden] {
   display: none;
 }
+.wb-header nav.wb-modules-panel {
+  display: block;
+  margin-left: 0;
+}
+.wb-header nav.wb-modules-panel[hidden] {
+  display: none;
+}
+.wb-modules-state {
+  white-space: nowrap;
+}
 .wb-modules-panel h2 {
   margin: 8px 8px 2px;
   font-size: 9.5px;
@@ -3184,7 +3194,7 @@ a.wb-modules-item[aria-current="page"] {
 .wb-header {
   position: relative;
 }
-@media (max-width: 800px) {
+@media (max-width: 1100px) {
   .wb-modules {
     position: static;
   }

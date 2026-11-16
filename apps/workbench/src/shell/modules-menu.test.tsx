@@ -102,3 +102,44 @@ describe("the Modules disclosure", () => {
     expect(within(panel).getByRole("status")).toHaveTextContent(/session is not ready/);
   });
 });
+
+describe("the Modules disclosure's focus behaviour", () => {
+  it("closes on Escape and returns focus to its button", async () => {
+    const { user, toggle, panel } = await openMenu("/");
+    within(panel).getByRole("link", { name: /Open workspace/ }).focus();
+
+    await user.keyboard("{Escape}");
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveFocus();
+  });
+
+  it("reaches the first destination with Tab and closes when focus leaves the panel", async () => {
+    const { user, toggle, panel } = await openMenu("/");
+    toggle.focus();
+    await user.tab();
+    expect(within(panel).getByRole("link", { name: /Open workspace/ })).toHaveFocus();
+
+    // Only available destinations take focus: one Tab stop per link.
+    const links = within(panel).getAllByRole("link");
+    for (let i = 1; i < links.length; i += 1) await user.tab();
+    expect(links[links.length - 1]).toHaveFocus();
+
+    await user.tab();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("closes on a press outside without taking focus", async () => {
+    const { user, toggle } = await openMenu("/");
+    await user.click(document.body);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("closes when the location changes underneath it", async () => {
+    const { user, toggle, router } = await openMenu("/");
+    await router.navigate({ to: "/laboratory" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+});

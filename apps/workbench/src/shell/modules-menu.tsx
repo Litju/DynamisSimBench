@@ -10,7 +10,7 @@
 
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { useLaboratoryStore, type Folio } from "../laboratory/store";
 import { useSession } from "../session/provider";
@@ -34,6 +34,8 @@ const STATE_LABEL: Record<Exclude<ModuleAvailability, "available">, string> = {
 export function ModulesMenu() {
   const [open, setOpen] = useState(false);
   const panelId = useId();
+  const root = useRef<HTMLDivElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
   const { session } = useSession();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const search = useRouterState({ select: (state) => state.location.search });
@@ -41,9 +43,45 @@ export function ModulesMenu() {
   const setFolio = useLaboratoryStore((state) => state.setFolio);
   const workspaceId = workspaceContext(pathname, search);
 
+  // A disclosure, not a modal: Escape closes it and returns focus to its button; a pointer
+  // press elsewhere closes it and leaves focus where the person put it.
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && root.current?.contains(event.target) !== true) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointer);
+    return () => document.removeEventListener("pointerdown", onPointer);
+  }, [open]);
+
+  // Any navigation, however it was made, leaves the menu closed.
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
   return (
-    <div className="wb-modules" data-open={open}>
+    <div
+      ref={root}
+      className="wb-modules"
+      data-open={open}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) {
+          event.stopPropagation();
+          setOpen(false);
+          toggle.current?.focus();
+        }
+      }}
+      onBlur={(event) => {
+        // Tabbing out of the panel closes it; focus is already where the person sent it.
+        if (open && event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) {
+          setOpen(false);
+        }
+      }}
+    >
       <button
+        ref={toggle}
         type="button"
         className="wb-modules-toggle"
         aria-expanded={open}
