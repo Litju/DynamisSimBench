@@ -27,7 +27,7 @@ describe("the workbench shell", () => {
 
     expect(await screen.findByText("DynamisBench")).toBeInTheDocument();
     expect(
-      screen.getByText("Human-movement VVUQ workbench"),
+      screen.getByText("Simulation diagnosis & benchmarking workbench"),
     ).toBeInTheDocument();
   });
 

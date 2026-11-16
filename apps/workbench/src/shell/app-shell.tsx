@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import "../fonts";
 import { useUiStore, type WorkbenchMode } from "../store/ui";
 
+import { ModulesMenu } from "./modules-menu";
 import { RuntimeStatus } from "./runtime-status";
 
 const modes: [WorkbenchMode, string][] = [
@@ -38,8 +39,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <div className="wb-brand">
           <strong>DynamisBench</strong>
-          <span>Human-movement VVUQ workbench</span>
+          <span>Simulation diagnosis &amp; benchmarking workbench</span>
         </div>
+
+        <ModulesMenu />
 
         <nav aria-label="Workbench">
           <Link to="/" activeOptions={{ exact: true, includeHash: false }} activeProps={{ "data-active": "true" }}>

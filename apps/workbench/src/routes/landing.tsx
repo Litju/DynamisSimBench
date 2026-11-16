@@ -28,8 +28,8 @@ function LandingPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-lg font-semibold tracking-tight">Workbench overview</h1>
         <p className="text-sm text-slate-600">
-          Local-first verification, validation, uncertainty quantification and benchmarking of
-          computational human-movement models.
+          Local-first diagnosis, verification and benchmarking of scientific simulation models. The
+          packaged reference model is a human-movement squat.
         </p>
       </div>
 
