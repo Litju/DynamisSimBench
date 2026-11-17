@@ -93,7 +93,8 @@ describe("the header's workspace context", () => {
 
   it("returns from a bound Laboratory to the same workspace", async () => {
     renderApplication("/laboratory?workspace=ws_abc-1");
-    const laboratory = await screen.findByRole("link", { name: "Laboratory" });
+    // The first render loads the Laboratory route's lazy chunk before the tree is drawn.
+    const laboratory = await screen.findByRole("link", { name: "Laboratory" }, { timeout: 10_000 });
 
     expect(laboratory).toHaveAttribute("data-active", "true");
     expect(header().getByRole("link", { name: "Workspace" })).toHaveAttribute("href", "/workspace/ws_abc-1");

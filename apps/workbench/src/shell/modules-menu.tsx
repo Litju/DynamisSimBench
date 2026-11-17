@@ -132,15 +132,18 @@ export function ModulesMenu() {
       </button>
 
       <nav id={panelId} className="wb-modules-panel" aria-label="Modules" hidden={!open}>
-        <div className="wb-modules-context">
-          {workspaceId === null ? (
-            <span>No workspace open · Laboratory folios show the packaged reference recordings</span>
-          ) : (
-            <span>
-              Workspace <code title={workspaceId}>{workspaceId}</code>
-            </span>
-          )}
-        </div>
+        {/* Drawn only while open, so a closed panel never repeats the workspace token. */}
+        {open && (
+          <div className="wb-modules-context">
+            {workspaceId === null ? (
+              <span>No workspace open · Laboratory folios show the packaged reference recordings</span>
+            ) : (
+              <span>
+                Workspace <code title={workspaceId}>{workspaceId}</code>
+              </span>
+            )}
+          </div>
+        )}
 
         {session.phase !== "ready" && (
           <p className="wb-modules-session" role="status">
