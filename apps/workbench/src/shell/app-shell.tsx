@@ -50,7 +50,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <ModulesMenu />
 
-        <nav aria-label="Workbench">
+        <nav className="wb-nav" aria-label="Workbench">
           <Link to="/" activeOptions={{ exact: true, includeHash: false }} activeProps={{ "data-active": "true" }}>
             Overview
           </Link>

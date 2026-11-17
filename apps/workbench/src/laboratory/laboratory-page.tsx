@@ -34,16 +34,8 @@ import { at, formatNumber, nearestBoundary, shortDigest } from "./series";
 import { Stage } from "./stage/stage";
 import { entryOptionLabel } from "./entry-label";
 import { findEntry, refKey, sameRef, type RecordingRef } from "./sources";
-import { FOLIOS, VIEW_PRESETS, resetLaboratoryStore, useLaboratoryStore, type Folio } from "./store";
+import { FOLIOS, FOLIO_LABELS, VIEW_PRESETS, resetLaboratoryStore, useLaboratoryStore } from "./store";
 import { Timeline } from "./timeline";
-
-const FOLIO_LABELS: Record<Folio, { numeral: string; label: string }> = {
-  study: { numeral: "I", label: "Study & Runs" },
-  laboratory: { numeral: "II", label: "Laboratory" },
-  atlas: { numeral: "III", label: "Model Atlas" },
-  analysis: { numeral: "IV", label: "Analysis" },
-  record: { numeral: "V", label: "Evidence" },
-};
 
 export function LaboratoryPage() {
   const { session, client } = useSession();

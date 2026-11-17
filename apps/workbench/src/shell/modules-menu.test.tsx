@@ -100,6 +100,26 @@ describe("the Modules disclosure", () => {
     );
   });
 
+  it("states the workspace context it navigates in", async () => {
+    const { panel } = await openMenu("/");
+    expect(panel).toHaveTextContent(/No workspace open/);
+  });
+
+  it("names the workspace in context and marks it as the current location", async () => {
+    const { panel } = await openMenu("/workspace/ws_abc-1");
+
+    expect(within(panel).getByText("ws_abc-1")).toBeInTheDocument();
+    expect(within(panel).getByRole("link", { name: /Current workspace/ })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("numbers Laboratory folios as the Laboratory does", async () => {
+    const { panel } = await openMenu("/");
+
+    expect(within(panel).getByRole("link", { name: /^Study & Runs, Laboratory folio I Reference/ })).toBeInTheDocument();
+    expect(within(panel).getByRole("link", { name: /^Evidence, Laboratory folio V Reference/ })).toBeInTheDocument();
+    expect(within(panel).getByRole("link", { name: /Open workspace/ }).textContent).not.toMatch(/folio/);
+  });
+
   it("says when the local API session is not ready", async () => {
     const { panel } = await openMenu("/");
     expect(within(panel).getByRole("status")).toHaveTextContent(/session is not ready/);

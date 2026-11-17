@@ -6,13 +6,28 @@
  * spelled out, never focusable and never links. The menu holds only its own open/closed state:
  * which workspace is in context is read from the location, and the Laboratory folio is the
  * Laboratory store's existing presentation state.
+ *
+ * The panel opens with the context it navigates in — the workspace in force, or that there is
+ * none — so a person knows before choosing whether a destination will be bound to a workspace.
  */
 
 import { useRouter, useRouterState } from "@tanstack/react-router";
-import { ChevronDown } from "lucide-react";
+import {
+  Activity,
+  Boxes,
+  ChartColumn,
+  ChevronDown,
+  FlaskConical,
+  GitCompareArrows,
+  LayoutGrid,
+  PenTool,
+  Puzzle,
+  ScrollText,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
-import { useLaboratoryStore, type Folio } from "../laboratory/store";
+import { FOLIO_LABELS, useLaboratoryStore, type Folio } from "../laboratory/store";
 import { useSession } from "../session/provider";
 
 import {
@@ -29,6 +44,18 @@ type ResolvedLink = Extract<ResolvedEntry, { kind: "link" }>;
 const STATE_LABEL: Record<Exclude<ModuleAvailability, "available">, string> = {
   planned: "Planned",
   unsupported: "Unsupported",
+};
+
+/** A recognisable mark per group; decorative, the group's heading carries the name. */
+const GROUP_ICON: Record<string, LucideIcon> = {
+  "workspace-models": Boxes,
+  "simulation-laboratory": FlaskConical,
+  diagnostics: Activity,
+  "experiments-comparison": GitCompareArrows,
+  "benchmarks-analysis": ChartColumn,
+  "evidence-provenance": ScrollText,
+  extensions: Puzzle,
+  "model-studio": PenTool,
 };
 
 export function ModulesMenu() {
@@ -61,6 +88,17 @@ export function ModulesMenu() {
     setOpen(false);
   }, [pathname]);
 
+  const isCurrent = (entry: ModuleEntry) => {
+    switch (entry.target?.kind) {
+      case "folio":
+        return pathname === "/laboratory" && folio === entry.target.folio;
+      case "workspace":
+        return workspaceId !== null && pathname.startsWith("/workspace/");
+      default:
+        return false;
+    }
+  };
+
   return (
     <div
       ref={root}
@@ -88,39 +126,54 @@ export function ModulesMenu() {
         aria-controls={panelId}
         onClick={() => setOpen((value) => !value)}
       >
+        <LayoutGrid aria-hidden size={14} />
         Modules
-        <ChevronDown aria-hidden size={14} />
+        <ChevronDown aria-hidden size={14} className="wb-modules-chevron" />
       </button>
 
       <nav id={panelId} className="wb-modules-panel" aria-label="Modules" hidden={!open}>
+        <div className="wb-modules-context">
+          {workspaceId === null ? (
+            <span>No workspace open · Laboratory folios show the packaged reference recordings</span>
+          ) : (
+            <span>
+              Workspace <code title={workspaceId}>{workspaceId}</code>
+            </span>
+          )}
+        </div>
+
         {session.phase !== "ready" && (
           <p className="wb-modules-session" role="status">
             The local API session is not ready. Destinations that read it will say so until it is.
           </p>
         )}
 
-        {MODULE_GROUPS.map((group) => (
-          <section key={group.id} aria-labelledby={`${panelId}-${group.id}`}>
-            <h2 id={`${panelId}-${group.id}`}>{group.label}</h2>
-            <ul>
-              {group.entries.map((entry) => (
-                <li key={entry.id}>
-                  <ModuleItem
-                    entry={entry}
-                    workspaceId={workspaceId}
-                    active={
-                      entry.target?.kind === "folio" &&
-                      pathname === "/laboratory" &&
-                      folio === entry.target.folio
-                    }
-                    onFolio={setFolio}
-                    onNavigate={() => setOpen(false)}
-                  />
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
+        <div className="wb-modules-groups">
+          {MODULE_GROUPS.map((group) => {
+            const Icon = GROUP_ICON[group.id];
+            return (
+              <section key={group.id} aria-labelledby={`${panelId}-${group.id}`}>
+                <h2 id={`${panelId}-${group.id}`}>
+                  {Icon !== undefined && <Icon aria-hidden size={13} />}
+                  {group.label}
+                </h2>
+                <ul>
+                  {group.entries.map((entry) => (
+                    <li key={entry.id}>
+                      <ModuleItem
+                        entry={entry}
+                        workspaceId={workspaceId}
+                        active={isCurrent(entry)}
+                        onFolio={setFolio}
+                        onNavigate={() => setOpen(false)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
       </nav>
     </div>
   );
@@ -147,47 +200,46 @@ function ModuleItem({
     ...(link.search === undefined ? {} : { search: link.search }),
     ...(link.hash === undefined ? {} : { hash: link.hash }),
   });
-  const href = (link: ResolvedLink) => router.buildLocation(navigation(link)).href;
 
   if (resolved.kind === "link") {
-    const activate = () => {
-      if (resolved.folio !== undefined) onFolio(resolved.folio);
-      onNavigate();
-    };
-    const content = (
-      <>
-        <span className="wb-modules-label">{entry.label}</span>
-        <span className="wb-modules-note">{entry.note}</span>
-      </>
-    );
+    const numeral = resolved.folio === undefined ? null : FOLIO_LABELS[resolved.folio].numeral;
     return (
       <a
         className="wb-modules-item"
-        href={href(resolved)}
+        href={router.buildLocation(navigation(resolved)).href}
         aria-current={active ? "page" : undefined}
         onClick={(event) => {
-          // Let the browser handle new-tab and modified clicks; route the plain click.
+          // Let the browser handle new-tab and modified clicks (the href names the folio);
+          // route the plain click in place.
           if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
             return;
           }
           event.preventDefault();
-          activate();
+          if (resolved.folio !== undefined) onFolio(resolved.folio);
+          onNavigate();
           void router.navigate(navigation(resolved));
         }}
       >
-        {content}
+        <span className="wb-modules-label">
+          {entry.label}
+          {numeral !== null && (
+            <span className="wb-modules-numeral" title={`Laboratory folio ${numeral}`}>
+              <span className="sr-only">, Laboratory folio</span> {numeral}
+            </span>
+          )}
+        </span>{" "}
+        <span className="wb-modules-note">{entry.note}</span>
       </a>
     );
   }
 
-  const state =
-    resolved.kind === "blocked" ? resolved.reason : STATE_LABEL[resolved.kind];
+  const state = resolved.kind === "blocked" ? resolved.reason : STATE_LABEL[resolved.kind];
   return (
     <div className="wb-modules-item" data-state={resolved.kind}>
       <span className="wb-modules-label">
         {entry.label}
         <span className="wb-modules-state">{state}</span>
-      </span>
+      </span>{" "}
       <span className="wb-modules-note">{entry.note}</span>
     </div>
   );
