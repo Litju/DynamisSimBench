@@ -75,18 +75,18 @@ export const MODULE_GROUPS: readonly ModuleGroup[] = [
     label: "Simulation Laboratory",
     entries: [
       {
-        id: "laboratory",
-        label: "Laboratory",
-        availability: "available",
-        note: "Reference squat recordings",
-        target: { kind: "folio", folio: "laboratory" },
-      },
-      {
         id: "study-runs",
         label: "Study & Runs",
         availability: "available",
         note: "Reference studies; run execution is not enabled",
         target: { kind: "folio", folio: "study" },
+      },
+      {
+        id: "laboratory",
+        label: "Laboratory",
+        availability: "available",
+        note: "Reference squat recordings",
+        target: { kind: "folio", folio: "laboratory" },
       },
       {
         id: "external-execution",
@@ -178,7 +178,7 @@ export const MODULE_GROUPS: readonly ModuleGroup[] = [
         id: "model-studio",
         label: "Model Studio",
         availability: "unsupported",
-        note: "Stage II · in-Workbench model authoring is not available",
+        note: "Model authoring is Stage II (M9); not in this release",
       },
     ],
   },
