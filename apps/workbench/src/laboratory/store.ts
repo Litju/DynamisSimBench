@@ -14,6 +14,15 @@ import { sameRef, type RecordingRef } from "./sources";
 export const FOLIOS = ["study", "laboratory", "atlas", "analysis", "record"] as const;
 export type Folio = (typeof FOLIOS)[number];
 
+/** Each folio's numeral and name, as the folio tabs and the shell's Modules menu show them. */
+export const FOLIO_LABELS: Record<Folio, { readonly numeral: string; readonly label: string }> = {
+  study: { numeral: "I", label: "Study & Runs" },
+  laboratory: { numeral: "II", label: "Laboratory" },
+  atlas: { numeral: "III", label: "Model Atlas" },
+  analysis: { numeral: "IV", label: "Analysis" },
+  record: { numeral: "V", label: "Evidence" },
+};
+
 export const VIEW_PRESETS = ["oblique", "sagittal", "frontal", "plan"] as const;
 export type ViewPreset = (typeof VIEW_PRESETS)[number];
 

@@ -14,9 +14,10 @@
 
 import { ChevronDown } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 
 import { ApiClientError } from "../api/errors";
+import { validateLaboratorySearch } from "../routes/laboratory";
 import type { ApiClient } from "../api/client";
 import { useSession } from "../session/provider";
 import type { WorkbenchSession } from "../session/types";
@@ -33,16 +34,8 @@ import { at, formatNumber, nearestBoundary, shortDigest } from "./series";
 import { Stage } from "./stage/stage";
 import { entryOptionLabel } from "./entry-label";
 import { findEntry, refKey, sameRef, type RecordingRef } from "./sources";
-import { FOLIOS, VIEW_PRESETS, resetLaboratoryStore, useLaboratoryStore, type Folio } from "./store";
+import { FOLIOS, FOLIO_LABELS, VIEW_PRESETS, resetLaboratoryStore, useLaboratoryStore } from "./store";
 import { Timeline } from "./timeline";
-
-const FOLIO_LABELS: Record<Folio, { numeral: string; label: string }> = {
-  study: { numeral: "I", label: "Study & Runs" },
-  laboratory: { numeral: "II", label: "Laboratory" },
-  atlas: { numeral: "III", label: "Model Atlas" },
-  analysis: { numeral: "IV", label: "Analysis" },
-  record: { numeral: "V", label: "Evidence" },
-};
 
 export function LaboratoryPage() {
   const { session, client } = useSession();
@@ -85,8 +78,15 @@ function SessionNotReady({ session }: { session: WorkbenchSession }) {
 }
 
 function LaboratoryLoader({ client }: { client: ApiClient }) {
-  const search = useSearch({ strict: false }) as { workspace?: string };
-  const boundWorkspace = typeof search.workspace === "string" ? search.workspace : null;
+  // A non-strict read is the raw address, so it is validated here exactly as the route does.
+  const raw = useSearch({ strict: false }) as Record<string, unknown>;
+  const search = validateLaboratorySearch(raw);
+  const boundWorkspace = search.workspace ?? null;
+  const requestedFolio = search.folio;
+  // Any folio request, honoured or not, leaves the address once it has been read.
+  const folioRequested = raw.folio !== undefined;
+  const navigate = useNavigate();
+  const setFolio = useLaboratoryStore((state) => state.setFolio);
   const workspaceId = useLaboratoryStore((state) => state.workspaceId);
   const setWorkspace = useLaboratoryStore((state) => state.setWorkspace);
   const ref = useLaboratoryStore((state) => state.recording);
@@ -102,10 +102,24 @@ function LaboratoryLoader({ client }: { client: ApiClient }) {
     }
   }, [client]);
 
-  // The route's workspace binds the laboratory to that workspace's studies and runs.
+  // The route's workspace binds the laboratory to that workspace's studies and runs — again
+  // after a new session generation has reset the store, so the binding the address and the
+  // shell name is the one the laboratory reads.
   useEffect(() => {
     setWorkspace(boundWorkspace);
-  }, [boundWorkspace, setWorkspace]);
+  }, [boundWorkspace, client, setWorkspace]);
+
+  // A link that names a folio opens on it; the request then leaves the address, so the folio
+  // tabs stay the one authority and the address never contradicts them.
+  useEffect(() => {
+    if (!folioRequested) return;
+    if (requestedFolio !== undefined) setFolio(requestedFolio);
+    void navigate({
+      to: "/laboratory",
+      search: boundWorkspace === null ? {} : { workspace: boundWorkspace },
+      replace: true,
+    });
+  }, [folioRequested, requestedFolio, boundWorkspace, setFolio, navigate]);
 
   // A run whose sealed evidence no longer verifies is taken off the stage at once, and the
   // laboratory says so: a held copy of it is never shown as a result.

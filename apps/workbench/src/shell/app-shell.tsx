@@ -5,6 +5,8 @@ import type { ReactNode } from "react";
 import "../fonts";
 import { useUiStore, type WorkbenchMode } from "../store/ui";
 
+import { workspaceContext } from "./modules";
+import { ModulesMenu } from "./modules-menu";
 import { RuntimeStatus } from "./runtime-status";
 
 const modes: [WorkbenchMode, string][] = [
@@ -29,7 +31,12 @@ function Emblem() {
 export function AppShell({ children }: { children: ReactNode }) {
   const { mode, setMode, theme, toggleTheme } = useUiStore();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const search = useRouterState({ select: (state) => state.location.search });
   const onLaboratory = pathname === "/laboratory";
+  // The opaque workspace the shell is in, so moving between its views never drops it.
+  const workspaceId = workspaceContext(pathname, search);
+  // The scientific contexts switch the workspace route's view; nowhere else do they act.
+  const onWorkspace = pathname.startsWith("/workspace/");
 
   return (
     <div className="wb-shell" data-theme={theme} data-route={onLaboratory ? "laboratory" : "workbench"}>
@@ -38,10 +45,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <div className="wb-brand">
           <strong>DynamisBench</strong>
-          <span>Human-movement VVUQ workbench</span>
+          <span>Simulation diagnosis &amp; benchmarking workbench</span>
         </div>
 
-        <nav aria-label="Workbench">
+        <ModulesMenu />
+
+        <nav className="wb-nav" aria-label="Workbench">
           <Link to="/" activeOptions={{ exact: true, includeHash: false }} activeProps={{ "data-active": "true" }}>
             Overview
           </Link>
@@ -50,7 +59,23 @@ export function AppShell({ children }: { children: ReactNode }) {
             Open workspace
           </Link>
 
-          <Link to="/laboratory" activeProps={{ "data-active": "true" }}>
+          {workspaceId !== null && (
+            <Link
+              to="/workspace/$workspaceId"
+              params={{ workspaceId }}
+              activeProps={{ "data-active": "true" }}
+              title={`Workspace ${workspaceId}`}
+            >
+              Workspace
+            </Link>
+          )}
+
+          <Link
+            to="/laboratory"
+            search={workspaceId === null ? {} : { workspace: workspaceId }}
+            activeOptions={{ includeSearch: false }}
+            activeProps={{ "data-active": "true" }}
+          >
             Laboratory
           </Link>
         </nav>
@@ -69,7 +94,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </button>
       </header>
 
-      {!onLaboratory && (
+      {onWorkspace && (
         <nav className="wb-modebar" aria-label="Scientific contexts">
           {modes.map(([id, label]) => (
             <button

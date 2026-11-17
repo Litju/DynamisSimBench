@@ -241,7 +241,7 @@ code {
   border-bottom: 1px solid var(--color-line);
   background: var(--color-panel);
 }
-.wb-header nav {
+.wb-header .wb-nav {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -555,22 +555,22 @@ code,
   color: var(--color-ink-3);
   margin-top: 3px;
 }
-.wb-header nav {
+.wb-header .wb-nav {
   gap: 4px;
   margin-left: 18px;
 }
-.wb-header nav a {
+.wb-header .wb-nav a {
   font-size: 12.5px;
   padding: 6px 10px;
   border-radius: 3px;
   color: var(--color-ink-2);
   text-decoration: none;
 }
-.wb-header nav a:hover {
+.wb-header .wb-nav a:hover {
   background: var(--color-hover);
   color: var(--color-ink);
 }
-.wb-header nav a[data-active="true"] {
+.wb-header .wb-nav a[data-active="true"] {
   color: var(--color-accent);
   box-shadow: inset 0 -2px 0 var(--color-accent);
 }
@@ -3081,4 +3081,255 @@ tr[data-status="not_evaluated"] .lab-check-status {
 .lab-facts dd {
   text-align: left;
   font-family: var(--font-sans);
+}
+
+/* ------------------------------------------------------------------------------------------
+ * The platform Modules disclosure (RES-548): a header button and a panel of grouped
+ * destinations, in the shell's existing ground, line, ink and accent tokens. Linked
+ * destinations read as ink; planned ones recede to the fourth ink with a dashed state mark;
+ * an unsupported one carries a solid, filled state mark. Two columns where there is room.
+ * ---------------------------------------------------------------------------------------- */
+.wb-header {
+  position: relative;
+}
+.wb-modules {
+  position: relative;
+}
+.wb-modules-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px 6px 10px;
+  border: 1px solid var(--color-line-2);
+  border-radius: 3px;
+  background: var(--color-panel-2);
+  color: var(--color-ink-2);
+  font-size: 12.5px;
+}
+.wb-modules-toggle:hover {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+.wb-modules[data-open="true"] .wb-modules-toggle {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+}
+.wb-modules-toggle svg {
+  color: var(--color-ink-3);
+}
+.wb-modules[data-open="true"] .wb-modules-toggle svg {
+  color: var(--color-accent);
+}
+.wb-modules[data-open="true"] .wb-modules-chevron {
+  transform: rotate(180deg);
+}
+.wb-modules-panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  box-sizing: border-box;
+  width: min(700px, calc(100vw - 32px));
+  max-height: calc(100vh - 72px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--color-line-2);
+  border-radius: 4px;
+  background: var(--color-panel);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+}
+.wb-modules-panel[hidden] {
+  display: none;
+}
+.wb-modules-context {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-panel-2);
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+.wb-modules-context span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-modules-context code {
+  margin-left: 4px;
+  color: var(--color-ink-2);
+}
+.wb-modules-session {
+  margin: 0;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-warn-soft);
+  font-size: 11.5px;
+  color: var(--color-ink-2);
+}
+.wb-modules-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 14px;
+  padding: 6px 8px 10px;
+}
+.wb-modules-panel section {
+  min-width: 0;
+}
+.wb-modules-panel h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 8px 3px;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-ink-3);
+}
+.wb-modules-panel h2 svg {
+  flex-shrink: 0;
+  color: var(--codex-gold);
+}
+.wb-modules-panel ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wb-modules-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px 6px;
+  border-radius: 3px;
+  color: var(--color-ink);
+  text-decoration: none;
+}
+a.wb-modules-item:hover {
+  background: var(--color-hover);
+}
+a.wb-modules-item:focus-visible {
+  outline-offset: -2px;
+}
+a.wb-modules-item[aria-current="page"] {
+  background: var(--color-accent-soft);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+a.wb-modules-item[aria-current="page"] .wb-modules-label {
+  color: var(--color-accent);
+}
+.wb-modules-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.wb-modules-numeral {
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--codex-gold);
+}
+.wb-modules-note {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--color-ink-3);
+}
+.wb-modules-item[data-state] .wb-modules-label {
+  font-weight: 400;
+  color: var(--color-ink-3);
+}
+.wb-modules-item[data-state] .wb-modules-note {
+  color: var(--color-ink-4);
+}
+.wb-modules-state {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px dashed var(--color-line-2);
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  color: var(--color-ink-4);
+}
+.wb-modules-item[data-state="unsupported"] .wb-modules-state {
+  border-style: solid;
+  background: var(--color-sunk);
+  color: var(--color-ink-3);
+}
+.wb-modules-item[data-state="blocked"] .wb-modules-state {
+  border-color: transparent;
+  padding: 0;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-style: italic;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-ink-3);
+}
+@media (max-width: 1100px) {
+  .wb-modules {
+    position: static;
+  }
+  .wb-modules-panel {
+    top: 100%;
+    left: 16px;
+    right: 16px;
+    width: auto;
+  }
+}
+@media (max-width: 720px) {
+  .wb-modules-groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Narrow windows: the header keeps one row of identity, Modules, status and ground, and the
+ * Workbench links take a second row of their own instead of pushing the ground switch onto a
+ * third; the Laboratory's folio tabs keep their names whole and scroll rather than break. */
+@media (max-width: 1100px) {
+  .wb-header {
+    row-gap: 4px;
+  }
+  .wb-header .wb-nav {
+    order: 1;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+  .lab-folios button {
+    white-space: nowrap;
+  }
+}
+@media (max-width: 900px) {
+  .wb-brand span {
+    display: none;
+  }
+  .lab-bar {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .lab-folios {
+    order: 1;
+    flex-basis: 100%;
+    margin: 0;
+    /* Room for the focus ring, which a scrolling strip would otherwise clip. */
+    padding: 4px;
+    overflow-x: auto;
+  }
+  .lab-folios button {
+    padding: 5px 12px 4px;
+    font-size: 15px;
+  }
+  .lab-recording-select {
+    margin-left: auto;
+  }
 }
