@@ -117,6 +117,29 @@ test("the Modules panel stays inside narrow windows", async ({ page, harness }) 
   }
 });
 
+test("a narrow window keeps the header to two rows and the folio names whole", async ({ page, harness }) => {
+  expect(harness.sidecar.credential).not.toBe("");
+  await page.setViewportSize({ width: 760, height: 900 });
+  const { toggle } = menu(page);
+  const theme = page.getByRole("button", { name: "Toggle color theme" });
+  const workbench = page.getByRole("navigation", { name: "Workbench" });
+
+  // Identity, Modules, status and ground share the first row; the Workbench links the second.
+  const [toggleBox, themeBox, navBox] = await Promise.all([toggle.boundingBox(), theme.boundingBox(), workbench.boundingBox()]);
+  expect(Math.abs(themeBox!.y + themeBox!.height / 2 - (toggleBox!.y + toggleBox!.height / 2))).toBeLessThan(8);
+  expect(navBox!.y).toBeGreaterThanOrEqual(toggleBox!.y + toggleBox!.height);
+
+  await workbench.getByRole("link", { name: "Laboratory", exact: true }).click();
+  const folios = page.getByRole("navigation", { name: "Folios" });
+  await expect(folios).toBeVisible({ timeout: 30_000 });
+  for (const button of await folios.getByRole("button").all()) {
+    const box = await button.boundingBox();
+    expect(box!.height, (await button.textContent()) ?? "").toBeLessThan(40);
+  }
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
 // Opt-in screenshots of the open menu, captured from the running application.
 test("modules menu screenshots", async ({ page, harness }) => {
   const directory = process.env.DYNAMISBENCH_UX_SCREENSHOTS;

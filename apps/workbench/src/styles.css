@@ -3292,3 +3292,42 @@ a.wb-modules-item[aria-current="page"] .wb-modules-label {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Narrow windows: the header keeps one row of identity, Modules, status and ground, and the
+ * Workbench links take a second row of their own instead of pushing the ground switch onto a
+ * third; the Laboratory's folio tabs keep their names whole and scroll rather than break. */
+@media (max-width: 1100px) {
+  .wb-header {
+    row-gap: 4px;
+  }
+  .wb-header .wb-nav {
+    order: 1;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+  .lab-folios button {
+    white-space: nowrap;
+  }
+}
+@media (max-width: 900px) {
+  .wb-brand span {
+    display: none;
+  }
+  .lab-bar {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .lab-folios {
+    order: 1;
+    flex-basis: 100%;
+    margin: 0;
+    overflow-x: auto;
+  }
+  .lab-folios button {
+    padding: 5px 12px 4px;
+    font-size: 15px;
+  }
+  .lab-recording-select {
+    margin-left: auto;
+  }
+}
