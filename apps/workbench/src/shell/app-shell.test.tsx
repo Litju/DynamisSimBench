@@ -7,7 +7,7 @@
  */
 
 import { userEvent } from "@testing-library/user-event";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useUiStore } from "../store/ui";
@@ -63,5 +63,40 @@ describe("the workbench shell", () => {
     const open = await screen.findByRole("link", { name: "Open workspace" });
 
     expect(open).toHaveAttribute("href", "/#open-workspace");
+  });
+});
+
+describe("the header's workspace context", () => {
+  const header = () => within(screen.getByRole("navigation", { name: "Workbench" }));
+
+  it("offers no workspace and no scientific contexts on the overview", async () => {
+    renderApplication("/");
+    await screen.findByRole("link", { name: "Overview" });
+
+    expect(header().queryByRole("link", { name: "Workspace" })).not.toBeInTheDocument();
+    expect(header().getByRole("link", { name: "Laboratory" })).toHaveAttribute("href", "/laboratory");
+    expect(screen.queryByRole("navigation", { name: "Scientific contexts" })).not.toBeInTheDocument();
+  });
+
+  it("marks the workspace as the location and keeps it on the way to the Laboratory", async () => {
+    renderApplication("/workspace/ws_abc-1");
+    const workspace = await screen.findByRole("link", { name: "Workspace" });
+
+    expect(workspace).toHaveAttribute("href", "/workspace/ws_abc-1");
+    expect(workspace).toHaveAttribute("data-active", "true");
+    expect(header().getByRole("link", { name: "Laboratory" })).toHaveAttribute(
+      "href",
+      "/laboratory?workspace=ws_abc-1",
+    );
+    expect(screen.getByRole("navigation", { name: "Scientific contexts" })).toBeInTheDocument();
+  });
+
+  it("returns from a bound Laboratory to the same workspace", async () => {
+    renderApplication("/laboratory?workspace=ws_abc-1");
+    const laboratory = await screen.findByRole("link", { name: "Laboratory" });
+
+    expect(laboratory).toHaveAttribute("data-active", "true");
+    expect(header().getByRole("link", { name: "Workspace" })).toHaveAttribute("href", "/workspace/ws_abc-1");
+    expect(header().getByRole("link", { name: "Workspace" })).not.toHaveAttribute("data-active");
   });
 });
