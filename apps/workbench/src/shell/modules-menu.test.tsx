@@ -87,6 +87,25 @@ describe("the Modules disclosure", () => {
     expect(screen.getByRole("link", { name: /^Analysis/ })).not.toHaveAttribute("aria-current");
   });
 
+  it("changes folio inside the Laboratory without adding a history entry", async () => {
+    const { user, router } = await openMenu("/laboratory");
+    const before = router.history.length;
+
+    await user.click(screen.getByRole("link", { name: /^Analysis/ }));
+
+    expect(useLaboratoryStore.getState().folio).toBe("analysis");
+    expect(router.history.length).toBe(before);
+  });
+
+  it("adds a history entry when it leaves another route for a folio", async () => {
+    const { user, router } = await openMenu("/");
+    const before = router.history.length;
+
+    await user.click(screen.getByRole("link", { name: /^Analysis/ }));
+
+    expect(router.history.length).toBe(before + 1);
+  });
+
   it("carries the workspace context into the workspace and Laboratory links", async () => {
     const { panel } = await openMenu("/workspace/ws_abc-1");
 

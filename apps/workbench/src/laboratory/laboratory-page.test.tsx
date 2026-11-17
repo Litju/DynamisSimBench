@@ -219,11 +219,31 @@ describe("the laboratory route", () => {
   });
 
   it("ignores a folio it does not have", async () => {
-    await renderLaboratory(undefined, "/laboratory?folio=nowhere");
+    const { router } = await renderLaboratory(undefined, "/laboratory?folio=nowhere");
 
     const folios = screen.getByRole("navigation", { name: "Folios" });
     expect(within(folios).getByRole("button", { pressed: true })).toHaveTextContent("Laboratory");
     expect(useLaboratoryStore.getState().folio).toBe("laboratory");
+    await waitFor(() => expect(router.state.location.search).toEqual({}));
+  });
+
+  it("keeps its workspace binding across a new session generation", async () => {
+    const recorder = stubFetch(({ url }) => {
+      const answer = laboratoryAnswer(url);
+      if (answer !== null) return answer;
+      if (url.endsWith("/info")) return jsonResponse(APPLICATION_INFO);
+      return unavailableEvents();
+    });
+    const controlled = controlledSource();
+    renderApplication("/laboratory?workspace=ws_1", { source: controlled.source });
+    await waitFor(() => expect(controlled.listening).toBe(true));
+    act(() => controlled.publish({ phase: "ready", api: readyApiSession() }));
+    await screen.findByRole("heading", { name: "Biomechanics Laboratory" }, { timeout: 10_000 });
+    expect(useLaboratoryStore.getState().workspaceId).toBe("ws_1");
+
+    act(() => controlled.publish({ phase: "ready", api: readyApiSession({ credential: "second-generation-credential" }) }));
+    await waitFor(() => expect(useLaboratoryStore.getState().workspaceId).toBe("ws_1"));
+    expect(recorder.calls.length).toBeGreaterThan(0);
   });
 
   it("shows what the checks reject in an ablation", async () => {

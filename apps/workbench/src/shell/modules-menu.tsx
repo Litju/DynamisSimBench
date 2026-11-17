@@ -132,7 +132,7 @@ export function ModulesMenu() {
       </button>
 
       <nav id={panelId} className="wb-modules-panel" aria-label="Modules" hidden={!open}>
-        {/* Drawn only while open, so a closed panel never repeats the workspace token. */}
+        {/* Drawn only while open: nothing else in the document needs a second copy of the token. */}
         {open && (
           <div className="wb-modules-context">
             {workspaceId === null ? (
@@ -167,6 +167,8 @@ export function ModulesMenu() {
                         entry={entry}
                         workspaceId={workspaceId}
                         active={isCurrent(entry)}
+                        // Inside the Laboratory a folio change replaces the entry, as its tabs do.
+                        replace={pathname === "/laboratory"}
                         onFolio={setFolio}
                         onNavigate={() => setOpen(false)}
                       />
@@ -186,12 +188,14 @@ function ModuleItem({
   entry,
   workspaceId,
   active,
+  replace,
   onFolio,
   onNavigate,
 }: {
   entry: ModuleEntry;
   workspaceId: string | null;
   active: boolean;
+  replace: boolean;
   onFolio: (folio: Folio) => void;
   onNavigate: () => void;
 }) {
@@ -220,7 +224,7 @@ function ModuleItem({
           event.preventDefault();
           if (resolved.folio !== undefined) onFolio(resolved.folio);
           onNavigate();
-          void router.navigate(navigation(resolved));
+          void router.navigate({ ...navigation(resolved), replace: replace && resolved.folio !== undefined });
         }}
       >
         <span className="wb-modules-label">

@@ -79,9 +79,12 @@ function SessionNotReady({ session }: { session: WorkbenchSession }) {
 
 function LaboratoryLoader({ client }: { client: ApiClient }) {
   // A non-strict read is the raw address, so it is validated here exactly as the route does.
-  const search = validateLaboratorySearch(useSearch({ strict: false }) as Record<string, unknown>);
+  const raw = useSearch({ strict: false }) as Record<string, unknown>;
+  const search = validateLaboratorySearch(raw);
   const boundWorkspace = search.workspace ?? null;
   const requestedFolio = search.folio;
+  // Any folio request, honoured or not, leaves the address once it has been read.
+  const folioRequested = raw.folio !== undefined;
   const navigate = useNavigate();
   const setFolio = useLaboratoryStore((state) => state.setFolio);
   const workspaceId = useLaboratoryStore((state) => state.workspaceId);
@@ -99,22 +102,24 @@ function LaboratoryLoader({ client }: { client: ApiClient }) {
     }
   }, [client]);
 
-  // The route's workspace binds the laboratory to that workspace's studies and runs.
+  // The route's workspace binds the laboratory to that workspace's studies and runs — again
+  // after a new session generation has reset the store, so the binding the address and the
+  // shell name is the one the laboratory reads.
   useEffect(() => {
     setWorkspace(boundWorkspace);
-  }, [boundWorkspace, setWorkspace]);
+  }, [boundWorkspace, client, setWorkspace]);
 
   // A link that names a folio opens on it; the request then leaves the address, so the folio
   // tabs stay the one authority and the address never contradicts them.
   useEffect(() => {
-    if (requestedFolio === undefined) return;
-    setFolio(requestedFolio);
+    if (!folioRequested) return;
+    if (requestedFolio !== undefined) setFolio(requestedFolio);
     void navigate({
       to: "/laboratory",
       search: boundWorkspace === null ? {} : { workspace: boundWorkspace },
       replace: true,
     });
-  }, [requestedFolio, boundWorkspace, setFolio, navigate]);
+  }, [folioRequested, requestedFolio, boundWorkspace, setFolio, navigate]);
 
   // A run whose sealed evidence no longer verifies is taken off the stage at once, and the
   // laboratory says so: a held copy of it is never shown as a result.
