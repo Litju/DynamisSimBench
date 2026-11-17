@@ -140,27 +140,63 @@ test("a narrow window keeps the header to two rows and the folio names whole", a
   expect(overflow).toBeLessThanOrEqual(0);
 });
 
-// Opt-in screenshots of the open menu, captured from the running application.
+// Opt-in screenshots of the shell and the open menu, captured from the running application:
+// the overview, a real opened workspace and a workspace-bound Laboratory folio, at a desktop
+// and a narrow width, in Studiolo and Vellum. Nothing is captured unless a directory is named.
 test("modules menu screenshots", async ({ page, harness }) => {
   const directory = process.env.DYNAMISBENCH_UX_SCREENSHOTS;
   test.skip(directory === undefined, "set DYNAMISBENCH_UX_SCREENSHOTS to a directory to capture");
   if (directory === undefined) return;
-  expect(harness.sidecar.credential).not.toBe("");
+  test.setTimeout(300_000);
   await mkdir(directory, { recursive: true });
-  for (const [name, width, height] of [
-    ["desktop", 1440, 900],
-    ["narrow", 700, 900],
-  ] as const) {
+  const { toggle, panel } = menu(page);
+  const shoot = async (name: string) => {
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: path.join(directory, `${name}.png`) });
+  };
+  const ground = async (want: "studiolo" | "vellum") => {
+    const dark = (await page.locator(".wb-shell").getAttribute("data-theme")) === "dark";
+    if (dark !== (want === "studiolo")) await page.getByRole("button", { name: "Toggle color theme" }).click();
+  };
+
+  for (const [width, height] of [[1440, 900], [760, 900]] as const) {
     await page.setViewportSize({ width, height });
-    await menu(page).toggle.click();
-    await page.waitForTimeout(300);
-    await page.screenshot({ path: path.join(directory, `modules-menu-${name}-studiolo.png`) });
-    await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Toggle color theme" }).click();
-    await menu(page).toggle.click();
-    await page.waitForTimeout(300);
-    await page.screenshot({ path: path.join(directory, `modules-menu-${name}-vellum.png`) });
-    await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Toggle color theme" }).click();
+    for (const theme of ["studiolo", "vellum"] as const) {
+      await page.goto("/");
+      await ground(theme);
+      await toggle.click();
+      await shoot(`overview-menu-${width}-${theme}`);
+      await page.keyboard.press("Escape");
+    }
   }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByLabel("Source root").fill(harness.workspace.sourceRoot);
+  await page.getByLabel("Evidence root").fill(harness.workspace.evidenceRoot);
+  await page.getByRole("button", { name: "Open workspace", exact: true }).click();
+  await page.waitForURL(/\/workspace\/[A-Za-z0-9_-]+$/);
+  const workspaceUrl = page.url();
+
+  for (const [width, height] of [[1440, 900], [760, 900]] as const) {
+    await page.setViewportSize({ width, height });
+    for (const theme of ["studiolo", "vellum"] as const) {
+      await page.goto(workspaceUrl);
+      await ground(theme);
+      await shoot(`workspace-${width}-${theme}`);
+      await toggle.click();
+      await page.keyboard.press("Tab");
+      await shoot(`workspace-menu-${width}-${theme}`);
+      await page.keyboard.press("Escape");
+      await toggle.click();
+      await panel.getByRole("link", { name: /^Analysis/ }).click();
+      await expect(page.getByRole("heading", { name: "Biomechanics Laboratory", exact: true })).toBeVisible({
+        timeout: 30_000,
+      });
+      await shoot(`laboratory-${width}-${theme}`);
+      await toggle.click();
+      await shoot(`laboratory-menu-${width}-${theme}`);
+      await page.keyboard.press("Escape");
+    }
+  }
+  expect(await page.content()).not.toContain(harness.sidecar.credential);
 });
