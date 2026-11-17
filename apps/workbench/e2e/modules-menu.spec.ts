@@ -85,6 +85,18 @@ test("the Modules menu keeps the opaque workspace context and opens real Laborat
   await panel.getByRole("link", { name: /Current workspace/ }).click();
   await page.waitForURL(workspaceUrl);
 
+  // A folio link's address opens that folio on its own, as a new tab or window loads it.
+  await toggle.click();
+  const analysisHref = await panel.getByRole("link", { name: /^Analysis/ }).getAttribute("href");
+  expect(analysisHref).toBe(`/laboratory?workspace=${workspaceId}&folio=analysis`);
+  await page.goto(analysisHref!);
+  await expect(page.getByRole("navigation", { name: "Folios" }).getByRole("button", { pressed: true })).toContainText(
+    "Analysis",
+    { timeout: 30_000 },
+  );
+  await page.waitForURL((url) => url.pathname === "/laboratory" && url.search === `?workspace=${workspaceId}`);
+  await page.goto(workspaceUrl);
+
   // The workspace identifier is the only context in any URL.
   expect(page.url()).not.toContain(harness.workspace.sourceRoot);
   expect(page.url()).not.toContain(harness.sidecar.credential);

@@ -62,7 +62,10 @@ describe("the Modules disclosure", () => {
       "href",
       "/#open-workspace",
     );
-    expect(within(panel).getByRole("link", { name: /^Analysis/ })).toHaveAttribute("href", "/laboratory");
+    expect(within(panel).getByRole("link", { name: /^Analysis/ })).toHaveAttribute(
+      "href",
+      "/laboratory?folio=analysis",
+    );
 
     for (const name of ["Diagnostics", "Extensions", "Benchmark packages", "Model Studio"]) {
       expect(within(panel).queryByRole("link", { name: new RegExp(name) })).not.toBeInTheDocument();
@@ -93,7 +96,7 @@ describe("the Modules disclosure", () => {
     );
     expect(within(panel).getByRole("link", { name: /Study & Runs/ })).toHaveAttribute(
       "href",
-      "/laboratory?workspace=ws_abc-1",
+      "/laboratory?workspace=ws_abc-1&folio=study",
     );
   });
 

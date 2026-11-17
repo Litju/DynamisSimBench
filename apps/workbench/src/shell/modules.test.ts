@@ -83,12 +83,13 @@ describe("resolving an entry", () => {
       kind: "link",
       to: "/laboratory",
       folio: "analysis",
-      search: { workspace: "ws1" },
+      search: { workspace: "ws1", folio: "analysis" },
     });
     expect(resolveEntry(entry("analysis"), null)).toEqual({
       kind: "link",
       to: "/laboratory",
       folio: "analysis",
+      search: { folio: "analysis" },
     });
   });
 });

@@ -219,7 +219,7 @@ export type ResolvedEntry =
       readonly to: "/" | "/laboratory" | "/workspace/$workspaceId";
       readonly hash?: string;
       readonly params?: { readonly workspaceId: string };
-      readonly search?: { readonly workspace: string };
+      readonly search?: { readonly workspace?: string; readonly folio?: Folio };
       readonly folio?: Folio;
     }
   | { readonly kind: "blocked"; readonly reason: string }
@@ -248,7 +248,8 @@ export function resolveEntry(entry: ModuleEntry, workspaceId: string | null): Re
         kind: "link",
         to: "/laboratory",
         folio: target.folio,
-        ...(workspaceId === null ? {} : { search: { workspace: workspaceId } }),
+        // The folio is in the address too, so a new tab or window opens on it.
+        search: { ...(workspaceId === null ? {} : { workspace: workspaceId }), folio: target.folio },
       };
   }
 }

@@ -14,9 +14,10 @@
 
 import { ChevronDown } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 
 import { ApiClientError } from "../api/errors";
+import { validateLaboratorySearch } from "../routes/laboratory";
 import type { ApiClient } from "../api/client";
 import { useSession } from "../session/provider";
 import type { WorkbenchSession } from "../session/types";
@@ -85,8 +86,12 @@ function SessionNotReady({ session }: { session: WorkbenchSession }) {
 }
 
 function LaboratoryLoader({ client }: { client: ApiClient }) {
-  const search = useSearch({ strict: false }) as { workspace?: string };
-  const boundWorkspace = typeof search.workspace === "string" ? search.workspace : null;
+  // A non-strict read is the raw address, so it is validated here exactly as the route does.
+  const search = validateLaboratorySearch(useSearch({ strict: false }) as Record<string, unknown>);
+  const boundWorkspace = search.workspace ?? null;
+  const requestedFolio = search.folio;
+  const navigate = useNavigate();
+  const setFolio = useLaboratoryStore((state) => state.setFolio);
   const workspaceId = useLaboratoryStore((state) => state.workspaceId);
   const setWorkspace = useLaboratoryStore((state) => state.setWorkspace);
   const ref = useLaboratoryStore((state) => state.recording);
@@ -106,6 +111,18 @@ function LaboratoryLoader({ client }: { client: ApiClient }) {
   useEffect(() => {
     setWorkspace(boundWorkspace);
   }, [boundWorkspace, setWorkspace]);
+
+  // A link that names a folio opens on it; the request then leaves the address, so the folio
+  // tabs stay the one authority and the address never contradicts them.
+  useEffect(() => {
+    if (requestedFolio === undefined) return;
+    setFolio(requestedFolio);
+    void navigate({
+      to: "/laboratory",
+      search: boundWorkspace === null ? {} : { workspace: boundWorkspace },
+      replace: true,
+    });
+  }, [requestedFolio, boundWorkspace, setFolio, navigate]);
 
   // A run whose sealed evidence no longer verifies is taken off the stage at once, and the
   // laboratory says so: a held copy of it is never shown as a result.

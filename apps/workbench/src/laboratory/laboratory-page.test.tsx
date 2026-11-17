@@ -26,7 +26,7 @@ afterEach(() => {
   useUiStore.setState({ theme: "dark" });
 });
 
-async function renderLaboratory(workspaceId?: string) {
+async function renderLaboratory(workspaceId?: string, address?: string) {
   const recorder = stubFetch(({ url }) => {
     const answer = laboratoryAnswer(url);
     if (answer !== null) return answer;
@@ -34,12 +34,14 @@ async function renderLaboratory(workspaceId?: string) {
     return unavailableEvents();
   });
   const controlled = controlledSource();
-  const location = workspaceId === undefined ? "/laboratory" : `/laboratory?workspace=${workspaceId}`;
+  const location =
+    address ?? (workspaceId === undefined ? "/laboratory" : `/laboratory?workspace=${workspaceId}`);
   const view = renderApplication(location, { source: controlled.source });
   await waitFor(() => expect(controlled.listening).toBe(true));
   act(() => controlled.publish({ phase: "ready", api: readyApiSession() }));
   await screen.findByRole("heading", { name: "Biomechanics Laboratory" }, { timeout: 10_000 });
-  await screen.findByTestId("stage-hud", {}, { timeout: 10_000 });
+  // The stage is drawn on the Laboratory folio, where the laboratory opens unless asked.
+  if (address === undefined) await screen.findByTestId("stage-hud", {}, { timeout: 10_000 });
   return { ...view, calls: recorder.calls };
 }
 
@@ -205,6 +207,23 @@ describe("the laboratory route", () => {
     expect(
       screen.getByText(/The MuJoCo worker that generated them is not run by this read-only integration\./),
     ).toBeInTheDocument();
+  });
+
+  it("opens on the folio its address names, then drops the request and keeps the workspace", async () => {
+    const { router } = await renderLaboratory(undefined, "/laboratory?workspace=ws_1&folio=analysis");
+
+    const folios = screen.getByRole("navigation", { name: "Folios" });
+    expect(within(folios).getByRole("button", { pressed: true })).toHaveTextContent("Analysis");
+    await waitFor(() => expect(router.state.location.search).toEqual({ workspace: "ws_1" }));
+    expect(useLaboratoryStore.getState().folio).toBe("analysis");
+  });
+
+  it("ignores a folio it does not have", async () => {
+    await renderLaboratory(undefined, "/laboratory?folio=nowhere");
+
+    const folios = screen.getByRole("navigation", { name: "Folios" });
+    expect(within(folios).getByRole("button", { pressed: true })).toHaveTextContent("Laboratory");
+    expect(useLaboratoryStore.getState().folio).toBe("laboratory");
   });
 
   it("shows what the checks reject in an ablation", async () => {
