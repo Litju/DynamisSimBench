@@ -9,18 +9,26 @@ from pathlib import Path
 import pytest
 
 from dynamisbench.domain.spec.sut import SUTInterface, SUTInterfaceKind
+from dynamisbench.evidence.bundle import RunId, parse_run_id
 from dynamisbench.execution import (
     PreflightRefusedError,
     PreparedExecutionInputs,
     RefusalCode,
     WorkerEnvironmentManifest,
+    canonical_preflight_bytes,
+    canonical_worker_request_bytes,
     preflight_run,
     prepare_execution_inputs,
 )
-from dynamisbench.identity import semantic_sha256
+from dynamisbench.execution.input_binding import (
+    build_worker_input_binding,
+    verify_worker_input_binding,
+)
+from dynamisbench.identity import canonical_semantic_bytes, semantic_sha256
 from dynamisbench.materialization import (
     MAX_ASSETS,
     AssetInput,
+    InputManifestDigest,
     MaterializationError,
     MaterializationRefusalCode,
     MaterializationStore,
@@ -55,10 +63,10 @@ def model_fixture(tmp_path: Path) -> ExecutionFixture:
 
 
 def _prepare(
-    fixture: ExecutionFixture, selection: WorkerEnvironmentManifest
+    fixture: ExecutionFixture, selection: WorkerEnvironmentManifest, run_id: RunId | None = None
 ) -> PreparedExecutionInputs:
     return prepare_execution_inputs(
-        fixture.run_id,
+        fixture.run_id if run_id is None else run_id,
         fixture.run,
         benchmark=fixture.benchmark,
         scenario=fixture.benchmark.scenarios[0],
@@ -180,3 +188,75 @@ def test_preparation_retains_materialization_asset_limit(model_fixture: Executio
         _prepare(fixture, worker_manifest(fixture))
     assert raised.value.code is MaterializationRefusalCode.INPUT_LIMIT_EXCEEDED
     _assert_no_run(fixture)
+
+
+def test_binding_commits_to_canonical_preparation(model_fixture: ExecutionFixture) -> None:
+    selection = worker_manifest(model_fixture)
+    prepared = _prepare(model_fixture, selection)
+    assert prepared.request is not None
+    binding = build_worker_input_binding(
+        prepared, selection, runtime_closure_sha256="a" * 64, isolation_profile_sha256="b" * 64
+    )
+    expected = {
+        "schema": "dynamisbench.worker-input-binding/1",
+        "run_id": str(model_fixture.run_id),
+        "execution_fingerprint": model_fixture.run.fingerprint.hex,
+        "request_sha256": hashlib.sha256(
+            canonical_worker_request_bytes(prepared.request)
+        ).hexdigest(),
+        "preflight_sha256": hashlib.sha256(canonical_preflight_bytes(prepared.report)).hexdigest(),
+        "input_manifest_sha256": prepared.inputs.manifest_digest.hex,
+        "environment_sha256": model_fixture.run.spec.environment.semantic_digest.hex,
+        "worker_selection_sha256": semantic_sha256(selection).hex,
+        "adapter_implementation_sha256": selection.adapter.implementation_digest,
+        "runtime_closure_sha256": "a" * 64,
+        "isolation_profile_sha256": "b" * 64,
+        "launch_nonce": binding.launch_nonce,
+    }
+    raw = canonical_semantic_bytes(expected)
+    assert raw == canonical_semantic_bytes(binding)
+    verify_worker_input_binding(raw, expected=binding, request=prepared.request)
+    _assert_no_run(model_fixture)
+
+
+@pytest.mark.parametrize("change", ["run", "report", "request", "selection", "manifest"])
+def test_binding_refuses_substituted_authority(
+    model_fixture: ExecutionFixture, change: str
+) -> None:
+    selection = worker_manifest(model_fixture)
+    prepared = _prepare(model_fixture, selection)
+    other = _prepare(model_fixture, selection, parse_run_id("other-run"))
+    if change == "run":
+        prepared = replace(prepared, request=other.request)
+    if change == "report":
+        prepared = replace(prepared, report=other.report)
+    if change == "request":
+        prepared = replace(prepared, request=None)
+    if change == "selection":
+        selection = worker_manifest(model_fixture, program=str(model_fixture.workspace.source_root))
+    if change == "manifest":
+        prepared = replace(
+            prepared,
+            inputs=replace(prepared.inputs, manifest_digest=InputManifestDigest(hex="f" * 64)),
+        )
+    with pytest.raises(MaterializationError, match="input_manifest_mismatch"):
+        build_worker_input_binding(
+            prepared, selection, runtime_closure_sha256="a" * 64, isolation_profile_sha256="b" * 64
+        )
+
+
+def test_binding_refuses_noncanonical_and_previous_attempt(model_fixture: ExecutionFixture) -> None:
+    selection = worker_manifest(model_fixture)
+    prepared = _prepare(model_fixture, selection)
+    assert prepared.request is not None
+    first = build_worker_input_binding(
+        prepared, selection, runtime_closure_sha256="a" * 64, isolation_profile_sha256="b" * 64
+    )
+    second = build_worker_input_binding(
+        prepared, selection, runtime_closure_sha256="a" * 64, isolation_profile_sha256="b" * 64
+    )
+    assert first.launch_nonce != second.launch_nonce
+    raw = canonical_semantic_bytes(first)
+    for data, expected in ((raw + b"\n", first), (raw, second)):
+        with pytest.raises(MaterializationError, match="input_manifest_mismatch"):
+            verify_worker_input_binding(data, expected=expected, request=prepared.request)
