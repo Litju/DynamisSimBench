@@ -72,8 +72,10 @@ from dynamisbench.execution.environment import (
 from dynamisbench.execution.preflight import (
     PreflightedRun,
     PreflightRefusedError,
+    PreparedExecutionInputs,
     admission_refusals,
     preflight_run,
+    prepare_execution_inputs,
     required_capabilities_of,
 )
 from dynamisbench.execution.supervisor import (
@@ -100,6 +102,7 @@ __all__ = [
     "PreflightRefusedError",
     "PreflightReport",
     "PreflightedRun",
+    "PreparedExecutionInputs",
     "Refusal",
     "RefusalCode",
     "RunLifecycleState",
@@ -121,6 +124,7 @@ __all__ = [
     "parse_worker_response",
     "preflight_digest",
     "preflight_run",
+    "prepare_execution_inputs",
     "refusal",
     "required_capabilities_of",
     "resolved_worker_program",
