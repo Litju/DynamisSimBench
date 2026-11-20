@@ -4,9 +4,9 @@ import { useState } from "react";
 
 import type { ApiClient } from "../api/client";
 import { ApiClientError } from "../api/errors";
-import type { ExternalResult } from "../api/external-results";
 import { useApiClient } from "../session/provider";
 import { Button } from "../ui/button";
+import type { ExternalResult } from "../workbench/external-samples";
 import { rootRoute } from "./root";
 
 export const externalResultsRoute = createRoute({
@@ -109,7 +109,11 @@ function ResultInspection({ client, workspaceId, resultId }: {
 }) {
   const result = useQuery({
     queryKey: ["external-result", workspaceId, resultId],
-    queryFn: () => client.getExternalResult(workspaceId, resultId),
+    queryFn: async () => {
+      const result = await client.getExternalResult(workspaceId, resultId);
+      const { decodeExternalSamples } = await import("../workbench/external-samples");
+      return decodeExternalSamples(result);
+    },
     retry: false,
     gcTime: 0,
     refetchOnMount: "always",
