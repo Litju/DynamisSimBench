@@ -264,10 +264,10 @@ class WorkspaceRegistry:
 
     def discover_external_results(
         self, identifier: str
-    ) -> tuple[dict[str, ResultSource], dict[str, Refusal]]:
+    ) -> tuple[dict[str, ResultSource], dict[str, Refusal], int]:
         registered = self.registration(identifier)
         with registered.results_lock:
-            sources, refused = discover_results(registered.workspace)
+            sources, refused, ignored_names = discover_results(registered.workspace)
             previous = {source: key for key, source in registered.results.items()}
             current: dict[str, ResultSource] = {}
             for source in sources.values():
@@ -279,7 +279,7 @@ class WorkspaceRegistry:
                 current[key] = source
             registered.results.clear()
             registered.results.update(current)
-            return current, refused
+            return current, refused, ignored_names
 
     def external_result(self, identifier: str, result_id: str) -> tuple[Workspace, ResultSource]:
         registered = self.registration(identifier)

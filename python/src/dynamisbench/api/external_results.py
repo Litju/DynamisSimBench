@@ -32,6 +32,8 @@ _REFUSALS = refusal_responses(
 
 
 class ResultEntry(ApiModel):
+    """A candidate handle pins discovered bytes. Inspection validates the CSV table."""
+
     name: str
     result_id: str | None = None
     refusal: Refusal | None = None
@@ -39,6 +41,7 @@ class ResultEntry(ApiModel):
 
 class ResultsResponse(ApiModel):
     results: tuple[ResultEntry, ...]
+    ignored_names: int
 
 
 class ResultField(ApiModel):
@@ -68,14 +71,17 @@ def list_results(
 ) -> ResultsResponse:
     response.headers["Cache-Control"] = "no-store"
     try:
-        sources, refused = registry.discover_external_results(workspace_id)
+        sources, refused, ignored_names = registry.discover_external_results(workspace_id)
     except WorkspaceNotFoundError:
         raise HTTPException(404, detail="Open the workspace to discover its results.") from None
     except ResultRefusedError as error:
         raise _refusal(error) from None
     entries = [ResultEntry(name=source.name, result_id=key) for key, source in sources.items()]
     entries.extend(ResultEntry(name=name, refusal=reason) for name, reason in refused.items())
-    return ResultsResponse(results=tuple(sorted(entries, key=lambda entry: entry.name)))
+    return ResultsResponse(
+        results=tuple(sorted(entries, key=lambda entry: entry.name)),
+        ignored_names=ignored_names,
+    )
 
 
 def _read(

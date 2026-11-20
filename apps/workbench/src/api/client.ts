@@ -34,6 +34,14 @@ import {
   decodeOpenWorkspaceResponse,
   decodeWorkspaceDiscoveryResponse,
 } from "./decode";
+import {
+  decodeExternalSamples,
+  decodeResultList,
+  decodeResultMetadata,
+  externalResultsPath,
+  type ExternalResult,
+  type ResultList,
+} from "./external-results";
 import { ApiClientError, MAX_API_MESSAGE_LENGTH, isApiErrorCode } from "./errors";
 import {
   decodeLaboratoryIndexResponse,
@@ -123,6 +131,8 @@ export interface ApiClient {
   listArtifacts(workspaceId: string): Promise<WorkspaceDiscoveryResponse>;
   /** `GET /api/v1/workspaces/{workspaceId}/artifacts/{artifactId}` */
   getArtifact(workspaceId: string, artifactId: string): Promise<ArtifactInspectionResponse>;
+  listExternalResults(workspaceId: string): Promise<ResultList>;
+  getExternalResult(workspaceId: string, resultId: string): Promise<ExternalResult>;
   /**
    * `GET /api/v1/events` as a live stream.
    *
@@ -351,6 +361,18 @@ export function createApiClient(
         { method: "GET" },
         decodeArtifactInspectionResponse,
       );
+    },
+
+    async listExternalResults(workspaceId): Promise<ResultList> {
+      return await send(externalResultsPath(workspaceId), { method: "GET" }, decodeResultList);
+    },
+
+    async getExternalResult(workspaceId, resultId): Promise<ExternalResult> {
+      const path = externalResultsPath(workspaceId, resultId);
+      const metadata = await send(path, { method: "GET" }, decodeResultMetadata);
+      if (metadata.result_id !== resultId) throw new ApiClientError("invalid_response");
+      const bytes = await sendBinary(`${path}/samples`, FRAME_STREAM_MEDIA_TYPE, MAX_FRAME_STREAM_BYTES);
+      return await decodeExternalSamples(metadata, bytes);
     },
 
     async laboratoryIndex(): Promise<LaboratoryIndexResponse> {

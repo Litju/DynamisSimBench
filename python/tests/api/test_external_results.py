@@ -11,8 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dynamisbench.transport.arrow import ARROW_IPC_STREAM_CONTENT_TYPE, read_ipc_stream
-from dynamisbench.workspace.external_results import MAX_BYTES, MAX_ROWS
+from dynamisbench.workspace.external_results import MAX_BYTES, MAX_ENTRIES, MAX_RESULTS, MAX_ROWS
 from tests.api.workspace_routes import client, open_route, snapshot
+from tests.workspace.links import make_directory_link, require_directory_link
 
 GOOD = b"time[s],position[mm],velocity[m/s]\r\n0,2,NaN\r\n0.125,,Inf\r\n0.25,1,-Inf\r\n"
 
@@ -83,6 +84,7 @@ def test_file_bound_result_round_trip(roots: tuple[Path, Path]) -> None:
         b"time[s],value[1]\n0,1,2",
         b"time[s],value[1]\nNaN,1",
         b"time[s],value[1]\n0,1e999",
+        b"time[s],value[1]\n1e-999,1",
         b"time[s],value[1]\n0,\xff",
         b"time[s],value[1]\n",
         b"time[s],value[1]\n" + b"0,1\n" * (MAX_ROWS + 1),
@@ -95,6 +97,7 @@ def test_file_bound_result_round_trip(roots: tuple[Path, Path]) -> None:
         "width",
         "missing-time",
         "overflow",
+        "underflow",
         "encoding",
         "empty",
         "row-limit",
@@ -118,7 +121,7 @@ def test_oversize_and_links_and_cross_workspace_id(roots: tuple[Path, Path]) -> 
     inbox = source / "external-results"
     with client() as api:
         base = result_path(api, source, evidence)
-        assert api.get(base).json() == {"results": []}
+        assert api.get(base).json() == {"results": [], "ignored_names": 0}
         assert api.get(base + "/%2E%2E%2Foutside.csv").status_code == 404
         inbox.mkdir()
         (inbox / "oversize.csv").write_bytes(b"x" * (MAX_BYTES + 1))
@@ -138,3 +141,49 @@ def test_oversize_and_links_and_cross_workspace_id(roots: tuple[Path, Path]) -> 
         assert api.get(wrong_workspace + url).status_code == 404
         file.unlink()
         assert api.get(base + url).status_code == 404
+
+
+def test_disorder_is_preserved_for_timebase_diagnostics(roots: tuple[Path, Path]) -> None:
+    source, evidence = roots
+    inbox = source / "external-results"
+    inbox.mkdir()
+    name = "résultat (1).csv"
+    (inbox / name).write_bytes(b"time[s],x[m]\n1,10\n0,20\n0,30\n")
+    (inbox / ("x" * 100 + ".csv")).write_bytes(GOOD)
+    with client() as api:
+        base = result_path(api, source, evidence)
+        listing = api.get(base).json()
+        assert listing["ignored_names"] == 1
+        (result,) = listing["results"]
+        assert result["name"] == name
+        samples = api.get(f"{base}/{result['result_id']}/samples")
+        assert samples.status_code == 200
+        assert [row["time"] for row in read_ipc_stream(samples.content).rows] == [1, 0, 0]
+
+
+def test_refuse_plain_file_and_link_in_place_of_results_directory(roots: tuple[Path, Path]) -> None:
+    source, evidence = roots
+    inbox = source / "external-results"
+    inbox.write_bytes(GOOD)
+    (evidence / "outside.csv").write_bytes(GOOD)
+    with client() as api:
+        base = result_path(api, source, evidence)
+        assert api.get(base).status_code == 422
+        inbox.unlink()
+        require_directory_link(make_directory_link(inbox, evidence), "result-folder containment")
+        response = api.get(base)
+        assert response.status_code == 422
+        assert "outside.csv" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("suffix", "count"), [(".csv", MAX_RESULTS + 1), (".txt", MAX_ENTRIES + 1)]
+)
+def test_bounded_discovery(roots: tuple[Path, Path], suffix: str, count: int) -> None:
+    source, evidence = roots
+    inbox = source / "external-results"
+    inbox.mkdir()
+    for index in range(count):
+        (inbox / f"{index}{suffix}").write_bytes(GOOD)
+    with client() as api:
+        assert api.get(result_path(api, source, evidence)).status_code == 422

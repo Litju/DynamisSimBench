@@ -93,7 +93,9 @@ export function ModulesMenu() {
       case "folio":
         return pathname === "/laboratory" && folio === entry.target.folio;
       case "workspace":
-        return workspaceId !== null && pathname.startsWith("/workspace/");
+        return workspaceId !== null && /^\/workspace\/[^/]+\/?$/.test(pathname);
+      case "external-results":
+        return workspaceId !== null && /\/results\/?$/.test(pathname);
       default:
         return false;
     }

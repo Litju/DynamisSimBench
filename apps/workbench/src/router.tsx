@@ -25,12 +25,15 @@ import {
 } from "@tanstack/react-router";
 
 import { laboratoryRoute } from "./routes/laboratory";
+import { externalResultsRoute } from "./routes/external-results";
 import { landingRoute } from "./routes/landing";
 import { rootRoute } from "./routes/root";
 import { workspaceRoute } from "./routes/workspace";
 import type { RouterContext } from "./routes/context";
 
-export const routeTree = rootRoute.addChildren([landingRoute, workspaceRoute, laboratoryRoute]);
+export const routeTree = rootRoute.addChildren([
+  landingRoute, workspaceRoute, externalResultsRoute, laboratoryRoute,
+]);
 
 /**
  * Build the application's router from the runtime's own `QueryClient`.

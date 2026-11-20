@@ -26,7 +26,7 @@ MAX_ROWS = 20_000
 MAX_VALUES = 100_000
 MAX_TOKEN = 64
 
-FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_. -]{0,95}\.csv", re.IGNORECASE | re.ASCII)
+MAX_FILENAME = 100
 HEADER = re.compile(
     rb"([A-Za-z][A-Za-z0-9_]{0,47})\[((?:[A-Za-z]+(?:\^-?[1-9])?(?:[*/][A-Za-z]+(?:\^-?[1-9])?)*)|1)\]"
 )
@@ -41,6 +41,7 @@ NONFINITE = {
 
 class Refusal(StrEnum):
     UNAVAILABLE = "The result source is unavailable or is not a regular, single-link file."
+    DIRECTORY = "The external-results folder must be a regular workspace directory without links."
     CHANGED = "The result changed. Refresh the results list to inspect the new source."
     LIMIT = "The source exceeds the external-results limits."
     SCHEMA = "Use a header beginning with time[s], followed by unique name[SI-unit] columns."
@@ -94,7 +95,7 @@ def _directory_identity(directory: Path) -> tuple[tuple[int, int], ...]:
     for component in (*reversed(directory.parents), directory):
         info = component.lstat()
         if not _plain(info, directory=True):
-            raise ResultRefusedError(Refusal.UNAVAILABLE)
+            raise ResultRefusedError(Refusal.DIRECTORY)
         chain.append(_identity(info))
     return tuple(chain)
 
@@ -103,12 +104,18 @@ def _stamp(entry: os.stat_result) -> tuple[int, ...]:
     return (*_identity(entry), entry.st_size, entry.st_mtime_ns)
 
 
-def _read_source(directory: Path, name: str) -> bytes:
-    if not FILENAME.fullmatch(name):
-        raise ResultRefusedError(Refusal.UNAVAILABLE)
+def _portable_csv_name(name: str) -> bool:
+    if not 4 < len(name) <= MAX_FILENAME or not name.lower().endswith(".csv"):
+        return False
     try:
-        validate_logical_reference(name)
+        segments = validate_logical_reference(name)
     except PathScopeError:
+        return False
+    return len(segments) == 1
+
+
+def _read_source(directory: Path, name: str) -> bytes:
+    if not _portable_csv_name(name):
         raise ResultRefusedError(Refusal.UNAVAILABLE) from None
     path = directory / name
     try:
@@ -135,9 +142,12 @@ def _read_source(directory: Path, name: str) -> bytes:
             with os.fdopen(descriptor, "rb", closefd=False) as handle:
                 raw = handle.read(MAX_BYTES + 1)
             after = path.lstat()
+            observed = os.fstat(descriptor)
             if (
                 len(raw) != opened.st_size
-                or _stamp(os.fstat(descriptor)) != _stamp(opened)
+                or not _plain(observed, directory=False)
+                or _stamp(observed) != _stamp(opened)
+                or observed.st_ctime_ns != opened.st_ctime_ns
                 or not _plain(after, directory=False)
                 or _stamp(after) != _stamp(opened)
                 or after.st_ctime_ns != before.st_ctime_ns
@@ -153,24 +163,29 @@ def _read_source(directory: Path, name: str) -> bytes:
 
 def discover_results(
     workspace: Workspace,
-) -> tuple[dict[str, ResultSource], dict[str, Refusal]]:
+) -> tuple[dict[str, ResultSource], dict[str, Refusal], int]:
     directory = workspace.source_root / RESULT_DIRECTORY
     names: list[str] = []
+    ignored_names = 0
     try:
         # Check the parent separately so a deleted workspace is different from an absent inbox.
         _directory_identity(workspace.source_root)
         try:
             chain = _directory_identity(directory)
         except FileNotFoundError:
-            return {}, {}
+            return {}, {}, 0
         with os.scandir(directory) as entries:
             for index, entry in enumerate(entries):
                 if index >= MAX_ENTRIES:
                     raise ResultRefusedError(Refusal.LIMIT)
-                if FILENAME.fullmatch(entry.name):
+                if not entry.name.lower().endswith(".csv"):
+                    continue
+                if _portable_csv_name(entry.name):
                     names.append(entry.name)
-                    if len(names) > MAX_RESULTS:
-                        raise ResultRefusedError(Refusal.LIMIT)
+                else:
+                    ignored_names += 1
+                if len(names) + ignored_names > MAX_RESULTS:
+                    raise ResultRefusedError(Refusal.LIMIT)
         if _directory_identity(directory) != chain:
             raise ResultRefusedError(Refusal.CHANGED)
     except OSError:
@@ -185,7 +200,7 @@ def discover_results(
             refused[name] = error.reason
         else:
             sources[name] = ResultSource(name, asset_sha256(raw).hex, len(raw))
-    return sources, refused
+    return sources, refused, ignored_names
 
 
 def read_result(workspace: Workspace, source: ResultSource) -> ResultSamples:
@@ -221,12 +236,15 @@ def _number(cell: bytes) -> float:
     if len(cell) > MAX_TOKEN or not NUMBER.fullmatch(cell):
         raise ResultRefusedError(Refusal.DATA)
     value = float(cell)
-    if not math.isfinite(value):
+    if not math.isfinite(value) or (
+        value == 0 and any(c in b"123456789" for c in cell.lower().split(b"e", 1)[0])
+    ):
         raise ResultRefusedError(Refusal.DATA)
     return value
 
 
 def parse_samples(raw: bytes) -> ResultSamples:
+    """Keep source order so timebase diagnostics can inspect repeated and reversed stamps."""
     if len(raw) > MAX_BYTES:
         raise ResultRefusedError(Refusal.LIMIT)
     lines = io.BytesIO(raw)
