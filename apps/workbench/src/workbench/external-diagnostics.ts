@@ -20,7 +20,7 @@ const METHODS = {
   regularity: {
     label: "Sampling regularity",
     method: "Compare each adjacent time step with the median observed step. Flag relative deviations greater than 1 ppm (10⁻⁶).",
-    limitations: "Requires at least two positive, finite steps in strictly increasing source order. The tolerance describes the decoded grid. The check cannot infer a prescribed cadence, omitted rows or clock accuracy.",
+    limitations: "Requires at least two positive, finite steps in strictly increasing source order. Relative comparisons scale steps by the upper middle step. The displayed median is rounded to binary64 seconds. The check cannot infer a prescribed cadence, omitted rows or clock accuracy.",
   },
   missing: {
     label: "Missing values",
@@ -114,10 +114,15 @@ export function diagnoseExternalResult({ metadata, rows }: ExternalResult): Exte
     const sorted = steps.toSorted((a, b) => a - b);
     const lower = sorted[Math.floor((sorted.length - 1) / 2)]!;
     const upper = sorted[Math.floor(sorted.length / 2)]!;
-    const median = lower + (upper - lower) / 2;
+    // In units of the upper middle step, the median stays in [0.5, 1] even
+    // when its value in seconds falls between adjacent positive subnormals.
+    const scaledMedian = (lower / upper + 1) / 2;
+    const median = scaledMedian * upper;
     const irregular: Tally = { count: 0 };
     for (const [index, step] of steps.entries()) {
-      if (Math.abs(step - median) / median > RELATIVE_STEP_TOLERANCE) countAt(irregular, index + 1);
+      if (Math.abs(step / upper - scaledMedian) / scaledMedian > RELATIVE_STEP_TOLERANCE) {
+        countAt(irregular, index + 1);
+      }
     }
     findings.push(finding("regularity", time, irregular.count === 0 ? "PASS" : "FAIL",
       `${irregular.count} of ${steps.length} intervals exceed the tolerance. Median ${median} s, range ${sorted[0]} to ${sorted.at(-1)} s.`,

@@ -71,7 +71,7 @@ test("discovers and inspects numeric files through the secured sidecar", async (
 
   const screenshotDir = process.env.DYNAMISBENCH_RESULTS_SCREENSHOTS;
   if (screenshotDir) {
-    await page.setViewportSize({ width: 1440, height: 1140 });
+    await page.setViewportSize({ width: 1440, height: 1240 });
     await page.getByRole("heading", { name: "External results" }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(screenshotDir, "gate-2-scalar.png") });
   }
@@ -148,11 +148,18 @@ test("exposes gaps, nonfinite observations, irregular grids and source refusals"
   const folder = path.join(sourceRoot, "external-results");
   await mkdir(folder);
   const gaps = "time[s],x[m]\n0,2\n1,100\n2,\n3,-100\n4,NaN\n5,+Inf\n6,-Inf\n7,3";
+  const extreme = Number.MAX_VALUE;
+  const denseRows = Array.from({ length: 20_000 }, (_, index) => {
+    const x = index === 10_017 ? 9999 : index === 19_999 ? "" : 0;
+    return `${index},${x},0,0,0`;
+  });
   const files = {
     "gaps.csv": gaps,
     "irregular.csv": "time[s],x[m]\n0,0\n1,2\n5,-9\n6,5",
     "duplicates.csv": "time[s],x[m]\n0,0\n2,1\n0,2",
-    "extreme.csv": "time[s],x[m]\n-1e308,-1e308\n1e308,1e308",
+    "extreme.csv": `time[s],x[m]\n${-extreme},${-extreme}\n${extreme},${extreme}`,
+    "offset.csv": "time[s],x[m]\n1000000000,1000000000\n1000000001,1000000001\n1000000002,1000000002",
+    "dense.csv": `time[s],x[m],y[m],z[m],speed[m/s]\n${denseRows.join("\n")}`,
     "bad-row.csv": "time[s],x[m]\n0,1\n1,2,3",
   };
   await Promise.all(Object.entries(files).map(([name, contents]) => writeFile(path.join(folder, name), contents)));
@@ -211,8 +218,26 @@ test("exposes gaps, nonfinite observations, irregular grids and source refusals"
   await choose("extreme.csv");
   await expect(regularity.locator("summary")).toContainText("UNSUPPORTED");
   await expect(plot).toBeVisible();
+  await expect(plot.getByText("Infinity")).toHaveCount(0);
   expect(await plot.locator("[d]").evaluateAll((paths) => paths.map((element) => element.getAttribute("d"))))
     .not.toEqual(expect.arrayContaining([expect.stringMatching(/NaN|Infinity/)]));
+
+  await choose("offset.csv");
+  await expect(page.getByText("Time ticks relative to 1000000000 s")).toBeVisible();
+  await expect(page.getByText("Value ticks relative to 1000000000 [m]")).toBeVisible();
+  await expect(plot.getByText("1", { exact: true })).toHaveCount(2);
+
+  await choose("dense.csv");
+  await expect(page.getByLabel("Visible time span")).toContainText("20000 of 20000 rows");
+  await expect(plot.getByText("9999", { exact: true })).toBeVisible();
+  const denseMissing = finding("Missing values").filter({ hasText: "x [m]" });
+  await denseMissing.locator("summary").click();
+  await expect(denseMissing).toContainText("1 of 20000 values are missing.");
+  await expect(denseMissing.getByText("20000", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+  await expect(page.getByLabel("Visible time span")).toContainText("10000 of 20000 rows");
+  await expect(plot.getByText("9999", { exact: true })).toHaveCount(0);
+  await expect(denseMissing).toContainText("1 of 20000 values are missing.");
 
   await choose("bad-row.csv");
   await expect(page.getByRole("alert")).toContainText("Each row must match the header");

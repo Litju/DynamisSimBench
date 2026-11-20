@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { ResultColumn } from "../api/external-results";
 import { Button } from "../ui/button";
 import type { ExternalResult } from "./external-samples";
-import { buildTrace, plotFraction, plotValue, recordedValue, timeDomain, type PlotDomain } from "./external-trace";
+import { buildTrace, plotFraction, plotTicks, plotValue, recordedValue, timeDomain, type PlotDomain } from "./external-trace";
 
 const LEFT = 78;
 const RIGHT = 40;
@@ -131,17 +131,6 @@ export function ExternalPlots({ result, connect }: { result: ExternalResult; con
   );
 }
 
-function ticks(domain: PlotDomain, fractions: readonly number[]) {
-  const seen = new Set<string>();
-  return fractions.flatMap((fraction) => {
-    const value = plotValue(domain, fraction);
-    const label = String(Number(value.toPrecision(5)));
-    if (seen.has(label)) return [];
-    seen.add(label);
-    return [{ label, fraction: plotFraction(value, domain) }];
-  });
-}
-
 function SignalPlot({ channel, column, rows, indices, domain, width, connect, cursor, inspect }: {
   channel: ResultColumn;
   column: number;
@@ -158,8 +147,8 @@ function SignalPlot({ channel, column, rows, indices, domain, width, connect, cu
   const y = (fraction: number) => BASELINE - fraction * (BASELINE - TOP);
   const trace = useMemo(() => buildTrace(rows, indices, column, (time) =>
     LEFT + plotFraction(time, domain) * span, y, connect), [rows, indices, column, domain, span, connect]);
-  const timeTicks = ticks(domain, width < 420 ? [0, 1] : TICK_FRACTIONS);
-  const valueTicks = trace.domain === null ? [] : ticks(trace.domain, TICK_FRACTIONS);
+  const timeAxis = plotTicks(domain, width < 420 ? [0, 1] : TICK_FRACTIONS);
+  const valueAxis = trace.domain === null ? null : plotTicks(trace.domain, TICK_FRACTIONS);
   const cursorValue = cursor[column]!;
   const cursorX = x(cursor[0]);
   const title = `${channel.name} [${channel.unit}]`;
@@ -168,6 +157,12 @@ function SignalPlot({ channel, column, rows, indices, domain, width, connect, cu
     <figure className="min-w-0 rounded border border-line bg-scene py-2">
       <figcaption className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3">
         <span className="min-w-0 wrap-anywhere font-medium text-ext">{title}</span>
+        {timeAxis.origin !== null && (
+          <span className="text-xs text-ink-2">Time ticks relative to {recordedValue(timeAxis.origin)} s</span>
+        )}
+        {valueAxis?.origin != null && (
+          <span className="text-xs text-ink-2">Value ticks relative to {recordedValue(valueAxis.origin)} [{channel.unit}]</span>
+        )}
         {trace.domain === null && <span className="text-xs text-ink-2">No finite values in view</span>}
         {trace.missing !== "" && <span className="text-xs text-warn">Missing · upper marks</span>}
         {trace.nonfinite !== "" && <span className="text-xs text-err">Nonfinite · lower marks</span>}
@@ -176,13 +171,13 @@ function SignalPlot({ channel, column, rows, indices, domain, width, connect, cu
         preserveAspectRatio="none" role="img"
         aria-label={`${title} over time [s]`} onClick={inspect} className="block cursor-crosshair">
         <g className="fill-ink-3 font-mono text-[10px]">
-          {valueTicks.map(({ label, fraction }) => (
+          {valueAxis?.ticks.map(({ label, fraction }) => (
             <g key={label}>
               <line x1={LEFT} x2={width - RIGHT} y1={y(fraction)} y2={y(fraction)} className="stroke-line-2" />
               <text x={LEFT - 6} y={y(fraction) + 3} textAnchor="end">{label}</text>
             </g>
           ))}
-          {timeTicks.map(({ label, fraction }) => (
+          {timeAxis.ticks.map(({ label, fraction }) => (
             <text key={label} x={LEFT + fraction * span} y={HEIGHT - 6}
               textAnchor={fraction === 1 ? "end" : "middle"}>{label}</text>
           ))}

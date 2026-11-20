@@ -33,6 +33,26 @@ export function recordedValue(value: number | null): string {
   return Object.is(value, -0) ? "-0" : String(value);
 }
 
+function tickLabel(value: number): string {
+  // Keep the rounded decimal as text. Re-parsing can overflow near Number.MAX_VALUE.
+  return value.toPrecision(5).replace(/(\.\d*?[1-9])0+(?=e|$)|\.0+(?=e|$)/, "$1");
+}
+
+export function plotTicks(domain: PlotDomain, fractions: readonly number[]) {
+  const values = [...new Set(fractions.map((fraction) => plotValue(domain, fraction)))];
+  const labels = values.map(tickLabel);
+  // Large offsets can make distinct ticks round to the same label. Express that
+  // narrow axis relative to its minimum and expose the origin next to the plot.
+  const origin = new Set(labels).size < values.length ? domain[0] : null;
+  return {
+    origin,
+    ticks: values.map((value, index) => ({
+      label: origin === null ? labels[index]! : tickLabel(value - origin),
+      fraction: plotFraction(value, domain),
+    })),
+  };
+}
+
 /** Map every visible source row to geometry before rounding coordinates for SVG. */
 export function buildTrace(
   rows: ExternalResult["rows"],

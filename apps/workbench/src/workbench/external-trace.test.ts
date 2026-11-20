@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTrace, plotFraction, plotValue, timeDomain } from "./external-trace";
+import { buildTrace, plotFraction, plotTicks, plotValue, timeDomain } from "./external-trace";
 import type { ExternalResult } from "./external-samples";
 
 describe("external trace geometry", () => {
@@ -36,5 +36,16 @@ describe("external trace geometry", () => {
     expect(plotFraction(0, [-Number.MAX_VALUE, Number.MAX_VALUE])).toBe(0.5);
     expect(plotValue([-Number.MAX_VALUE, Number.MAX_VALUE], 0.5)).toBe(0);
     expect(plotFraction(8, [8, 8])).toBe(0.5);
+  });
+
+  it("labels finite extremes and resolves closely spaced values at a large offset", () => {
+    const values = plotTicks([-Number.MAX_VALUE, Number.MAX_VALUE], [0, 0.5, 1]);
+    expect(values.ticks.map(({ label }) => label)).toEqual(["-1.7977e+308", "0", "1.7977e+308"]);
+    expect(plotTicks([1e9, 1e9 + 1], [0, 0.5, 1])).toEqual({
+      origin: 1e9,
+      ticks: [
+        { label: "0", fraction: 0 }, { label: "0.5", fraction: 0.5 }, { label: "1", fraction: 1 },
+      ],
+    });
   });
 });

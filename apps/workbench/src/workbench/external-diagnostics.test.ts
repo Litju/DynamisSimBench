@@ -67,6 +67,14 @@ describe("external diagnostics v1", () => {
     expect(diagnose([[-1e308, 1, 1], [1e308, 1, 1]]).findings[2]?.status).toBe("UNSUPPORTED");
   });
 
+  it("compares steps before converting a subnormal median to displayed seconds", () => {
+    const tiny = Number.MIN_VALUE;
+    const { findings } = diagnose([[0, 1, 1], [tiny, 1, 1], [tiny * 3, 1, 1]]);
+    expect(findings[2]).toMatchObject({
+      check: "regularity", status: "FAIL", affectedCount: 2, firstAffectedRow: 2,
+    });
+  });
+
   it("checks the last admitted row even in a dense result", () => {
     const rows: ExternalResult["rows"] = Array.from({ length: 20_000 }, (_, i) => [
       i, i === 19_999 ? null : 1, i === 19_999 ? Infinity : 1,
