@@ -36,6 +36,7 @@ from dynamisbench.api.events import (
     EventBroadcaster,
     events_router,
 )
+from dynamisbench.api.external_results import external_results_router
 from dynamisbench.api.laboratory import laboratory_router
 from dynamisbench.api.routing import (
     API_V1_PREFIX,
@@ -91,6 +92,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(v1_router)
     app.include_router(workspace_router, prefix=API_V1_PREFIX)
+    app.include_router(external_results_router, prefix=API_V1_PREFIX)
     app.include_router(events_router, prefix=API_V1_PREFIX)
     # Packaged diagnostic data is a read-only product surface; it adds no run command,
     # workspace write, simulator import, or scientific authority.
