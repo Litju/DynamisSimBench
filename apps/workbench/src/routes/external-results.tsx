@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -29,6 +29,7 @@ function ExternalResultsPage() {
 }
 
 function ResultBrowser({ client, workspaceId }: { client: ApiClient; workspaceId: string }) {
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
   const listing = useQuery({
     queryKey: ["external-results", workspaceId],
@@ -37,7 +38,7 @@ function ResultBrowser({ client, workspaceId }: { client: ApiClient; workspaceId
   });
   const currentList = listing.isError || listing.isFetching ? undefined : listing.data;
   const entries = currentList?.results ?? [];
-  const resultId = entries.find((entry) => entry.result_id === selected)?.result_id ?? null;
+  const current = selected === null ? undefined : entries.find((entry) => entry.result_id === selected);
 
   return (
     <>
@@ -74,9 +75,17 @@ function ResultBrowser({ client, workspaceId }: { client: ApiClient; workspaceId
                 {entry.result_id !== null ? (
                   <Button
                     type="button"
-                    className="h-auto min-h-9 whitespace-normal py-1 text-left aria-pressed:bg-slate-100"
-                    aria-pressed={entry.result_id === resultId}
-                    onClick={() => setSelected(entry.result_id)}
+                    className="h-auto min-h-9 border border-transparent whitespace-normal py-1 text-left aria-pressed:border-[var(--color-accent)] aria-pressed:bg-slate-100"
+                    aria-pressed={entry === current}
+                    onClick={() => {
+                      if (entry === current) {
+                        void queryClient.invalidateQueries({
+                          queryKey: ["external-result", workspaceId, entry.result_id],
+                        });
+                      } else {
+                        setSelected(entry.result_id);
+                      }
+                    }}
                   >
                     {entry.name}
                   </Button>
@@ -91,26 +100,28 @@ function ResultBrowser({ client, workspaceId }: { client: ApiClient; workspaceId
           </ul>
         </section>
         <section className="min-w-0 rounded-md border border-slate-200 bg-white p-4" aria-label="Result inspection">
-          {resultId === null
+          {current === undefined || current.result_id === null
             ? currentList !== undefined && selected !== null
               ? <p role="status">The selected source changed or became unavailable. Select a file to inspect its current data.</p>
               : <p>Select a workspace file to inspect its recorded data.</p>
-            : <ResultInspection key={resultId} client={client} workspaceId={workspaceId} resultId={resultId} />}
+            : <ResultInspection key={current.result_id} client={client} workspaceId={workspaceId} resultId={current.result_id} sourceName={current.name} />}
         </section>
       </div>
     </>
   );
 }
 
-function ResultInspection({ client, workspaceId, resultId }: {
+function ResultInspection({ client, workspaceId, resultId, sourceName }: {
   client: ApiClient;
   workspaceId: string;
   resultId: string;
+  sourceName: string;
 }) {
   const result = useQuery({
     queryKey: ["external-result", workspaceId, resultId],
     queryFn: async () => {
       const result = await client.getExternalResult(workspaceId, resultId);
+      if (result.metadata.source_name !== sourceName) throw new ApiClientError("invalid_response");
       const { decodeExternalSamples } = await import("../workbench/external-samples");
       return decodeExternalSamples(result);
     },

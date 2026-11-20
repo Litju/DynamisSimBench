@@ -64,6 +64,8 @@ test("discovers and inspects numeric files through the secured sidecar", async (
 
   await page.getByRole("button", { name: "wrong-schema.csv", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Use a header beginning with time[s]");
+  await page.getByRole("button", { name: "scalar-decay.csv", exact: true }).click();
+  await expect(page.getByText(digest(scalar), { exact: true })).toBeVisible();
   await writeFile(path.join(folder, "scalar-decay.csv"), "time[s],concentration[mol/m^3]\n0,42");
   await page.getByRole("button", { name: "scalar-decay.csv", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("The result changed.");

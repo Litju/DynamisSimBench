@@ -20,6 +20,7 @@ describe("external result contracts", () => {
   it("only builds result URLs out of opaque tokens", () => {
     expect(externalResultsPath(handle, handle)).toBe(`/workspaces/${handle}/external-results/${handle}`);
     expect(() => externalResultsPath(handle, "../result.csv")).toThrow();
+    expect(() => externalResultsPath(handle, handle + "\n")).toThrow();
     expect(() => externalResultsPath("C:/workspaces/example", handle)).toThrow();
   });
 
