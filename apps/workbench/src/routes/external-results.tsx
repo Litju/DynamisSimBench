@@ -1,12 +1,16 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { ApiClient } from "../api/client";
 import { ApiClientError } from "../api/errors";
 import { useApiClient } from "../session/provider";
 import { Button } from "../ui/button";
+import { diagnoseExternalResult } from "../workbench/external-diagnostics";
+import { ExternalFindings } from "../workbench/external-findings";
+import { ExternalPlots } from "../workbench/external-plots";
 import type { ExternalResult } from "../workbench/external-samples";
+import { recordedValue } from "../workbench/external-trace";
 import { rootRoute } from "./root";
 
 export const externalResultsRoute = createRoute({
@@ -144,16 +148,16 @@ function failureMessage(error: unknown): string {
 const PAGE_SIZE = 12;
 
 function SampleInspection({ result }: { result: ExternalResult }) {
-  const [page, setPage] = useState(0);
   const { metadata, rows } = result;
-  const start = page * PAGE_SIZE;
-  const end = Math.min(start + PAGE_SIZE, rows.length);
+  const signalCount = metadata.columns.length - 1;
+  const diagnostics = useMemo(() => diagnoseExternalResult(result), [result]);
+  const regular = diagnostics.findings.some((finding) => finding.check === "regularity" && finding.status === "PASS");
 
   return (
     <>
       <h2 className="break-all text-lg font-semibold">{metadata.source_name}</h2>
-      <p className="mt-1 text-sm text-slate-600">Read-only external result · {rows.length} samples · {metadata.columns.length - 1} signals</p>
-      <dl className="my-4 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[max-content_minmax(0,1fr)]">
+      <p className="mt-1 text-sm text-slate-600">Read-only external result · {rows.length} samples · {signalCount} {signalCount === 1 ? "signal" : "signals"}</p>
+      <dl aria-label="Result source" className="my-4 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[max-content_minmax(0,1fr)]">
         <dt className="font-medium">Workspace source</dt>
         <dd className="break-all"><code>external-results/{metadata.source_name}</code></dd>
         <dt className="font-medium">Source SHA-256</dt>
@@ -161,6 +165,19 @@ function SampleInspection({ result }: { result: ExternalResult }) {
         <dt className="font-medium">Format</dt>
         <dd><code>{metadata.schema_version}</code> · {metadata.size_bytes.toLocaleString()} bytes</dd>
       </dl>
+      <ExternalPlots result={result} connect={regular} />
+      <ExternalFindings diagnostics={diagnostics} />
+      <RecordedSamples result={result} />
+    </>
+  );
+}
+
+function RecordedSamples({ result: { metadata, rows } }: { result: ExternalResult }) {
+  const [page, setPage] = useState(0);
+  const start = page * PAGE_SIZE;
+  const end = Math.min(start + PAGE_SIZE, rows.length);
+  return (
+    <>
       <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Recorded sample table">
         <table className="w-full whitespace-nowrap text-left text-sm">
           <caption className="mb-1 text-left font-medium">Recorded samples {start + 1}–{end} of {rows.length}</caption>
@@ -178,7 +195,7 @@ function SampleInspection({ result }: { result: ExternalResult }) {
                 <th scope="row" className="px-2 py-1 font-normal text-slate-600">{start + index + 1}</th>
                 {row.map((value, columnIndex) => (
                   <td key={metadata.columns[columnIndex]?.name} className="px-2 py-1">
-                    {value === null ? "Missing" : Object.is(value, -0) ? "-0" : String(value)}
+                    {recordedValue(value)}
                   </td>
                 ))}
               </tr>
