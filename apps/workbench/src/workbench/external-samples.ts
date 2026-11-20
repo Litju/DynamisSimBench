@@ -4,7 +4,7 @@ import { decodeArrowIpcStream } from "../arrow/arrow";
 
 export interface ExternalResult {
   readonly metadata: ResultMetadata;
-  readonly rows: readonly (readonly (number | null)[])[];
+  readonly rows: readonly (readonly [time: number, ...signals: (number | null)[]])[];
 }
 
 export async function decodeExternalSamples({
@@ -18,11 +18,15 @@ export async function decodeExternalSamples({
       field.name === metadata.columns[index]?.name && field.type === "Float64" && field.nullable)
   ) throw new ApiClientError("invalid_response");
 
-  const rows = table.rows.map((row) => metadata.columns.map(({ name }, index) => {
-    const value = Object.hasOwn(row, name) ? row[name] : undefined;
-    if (index === 0 && typeof value === "number" && Number.isFinite(value)) return value;
-    if (index > 0 && (typeof value === "number" || value === null)) return value;
-    throw new ApiClientError("invalid_response");
-  }));
+  const signals = metadata.columns.slice(1);
+  const rows = table.rows.map((row): ExternalResult["rows"][number] => {
+    const time = Object.hasOwn(row, "time") ? row.time : undefined;
+    if (typeof time !== "number" || !Number.isFinite(time)) throw new ApiClientError("invalid_response");
+    return [time, ...signals.map(({ name }) => {
+      const value = Object.hasOwn(row, name) ? row[name] : undefined;
+      if (typeof value === "number" || value === null) return value;
+      throw new ApiClientError("invalid_response");
+    })];
+  });
   return { metadata, rows };
 }
