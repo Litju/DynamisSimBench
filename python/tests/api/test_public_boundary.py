@@ -101,6 +101,7 @@ record.
 """
 
 READER_MODULES = (
+    "external_results.py",
     "workspace_registry.py",
     "workspaces.py",
 )
@@ -335,6 +336,7 @@ def test_no_digest_reaches_an_api_module_directly(filename: str) -> None:
         ("server.py", SESSION_EXTERNAL_SURFACE),
         ("events.py", ALLOWED_EXTERNAL_SURFACE),
         (LABORATORY_MODULE, ALLOWED_EXTERNAL_SURFACE),
+        ("external_results.py", ALLOWED_EXTERNAL_SURFACE),
     ],
 )
 def test_the_api_package_has_a_closed_external_surface(
@@ -498,6 +500,9 @@ def test_the_openapi_document_publishes_exactly_the_versioned_routes() -> None:
         f"{API_V1_PREFIX}/workspaces/open",
         f"{API_V1_PREFIX}/workspaces/{{workspace_id}}/artifacts",
         f"{API_V1_PREFIX}/workspaces/{{workspace_id}}/artifacts/{{artifact_id}}",
+        f"{API_V1_PREFIX}/workspaces/{{workspace_id}}/external-results",
+        f"{API_V1_PREFIX}/workspaces/{{workspace_id}}/external-results/{{result_id}}",
+        f"{API_V1_PREFIX}/workspaces/{{workspace_id}}/external-results/{{result_id}}/samples",
     ]
     for path, operations in paths.items():
         expected = ["post"] if path.endswith("/open") else ["get"]

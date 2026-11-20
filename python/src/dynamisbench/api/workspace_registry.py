@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from dynamisbench.workspace import Workspace, open_workspace
+from dynamisbench.workspace.external_results import Refusal, ResultSource, discover_results
 from dynamisbench.workspace.source_authority import SourceLocator
 
 __all__ = [
@@ -110,6 +111,8 @@ class RegisteredWorkspace:
     lock: threading.Lock = field(default_factory=threading.Lock)
     locators: dict[str, SourceLocator] = field(default_factory=dict)
     references: dict[SourceLocator, str] = field(default_factory=dict)
+    results_lock: threading.Lock = field(default_factory=threading.Lock)
+    results: dict[str, ResultSource] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,6 +261,33 @@ class WorkspaceRegistry:
                     registered.locators[artifact_id] = locator
                 minted.append(artifact_id)
             return tuple(minted)
+
+    def discover_external_results(
+        self, identifier: str
+    ) -> tuple[dict[str, ResultSource], dict[str, Refusal]]:
+        registered = self.registration(identifier)
+        with registered.results_lock:
+            sources, refused = discover_results(registered.workspace)
+            previous = {source: key for key, source in registered.results.items()}
+            current: dict[str, ResultSource] = {}
+            for source in sources.values():
+                key = previous.get(source)
+                if key is None:
+                    key = _opaque_id(ARTIFACT_ID_BYTES)
+                    while key in registered.results or key in current:  # pragma: no cover
+                        key = _opaque_id(ARTIFACT_ID_BYTES)
+                current[key] = source
+            registered.results.clear()
+            registered.results.update(current)
+            return current, refused
+
+    def external_result(self, identifier: str, result_id: str) -> tuple[Workspace, ResultSource]:
+        registered = self.registration(identifier)
+        with registered.results_lock:
+            source = registered.results.get(result_id)
+        if source is None:
+            raise WorkspaceNotFoundError("no result is registered under that identifier")
+        return registered.workspace, source
 
     def forget(self, identifier: str) -> None:
         """Drop one workspace registration, or do nothing when it is not registered.
