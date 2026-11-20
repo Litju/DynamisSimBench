@@ -8,10 +8,6 @@ from dynamisbench.api.errors import ErrorResponse, refusal_responses
 from dynamisbench.api.models import ApiModel
 from dynamisbench.api.workspace_registry import WorkspaceNotFoundError
 from dynamisbench.api.workspaces import RegisteredWorkspace
-from dynamisbench.transport.arrow import (
-    ARROW_IPC_STREAM_CONTENT_TYPE,
-    encode_nullable_float_columns,
-)
 from dynamisbench.workspace.external_results import (
     Refusal,
     ResultRefusedError,
@@ -126,12 +122,19 @@ def inspect_result(
         **_REFUSALS,
         200: {
             "content": {
-                ARROW_IPC_STREAM_CONTENT_TYPE: {"schema": {"type": "string", "format": "binary"}}
+                "application/vnd.apache.arrow.stream": {
+                    "schema": {"type": "string", "format": "binary"}
+                }
             }
         },
     },
 )
 def result_samples(workspace_id: str, result_id: str, registry: RegisteredWorkspace) -> Response:
+    from dynamisbench.transport.arrow import (
+        ARROW_IPC_STREAM_CONTENT_TYPE,
+        encode_nullable_float_columns,
+    )
+
     _, samples = _read(registry, workspace_id, result_id)
     return Response(
         encode_nullable_float_columns(
