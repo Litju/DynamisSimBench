@@ -44,6 +44,8 @@ function ResultBrowser({ client, workspaceId }: { client: ApiClient; workspaceId
   const listing = useQuery({
     queryKey: ["external-results", workspaceId],
     queryFn: () => client.listExternalResults(workspaceId),
+    // The sidecar is loopback. Attempt a fresh read even when the browser reports offline.
+    networkMode: "always",
     retry: false,
   });
   const currentList = listing.isError || listing.isFetching ? undefined : listing.data;
@@ -165,6 +167,7 @@ function ResultInspection({ client, workspaceId, a, b }: {
       }
       return Promise.allSettled([read(a), read(b)] as const);
     },
+    networkMode: "always",
     retry: false,
     gcTime: 0,
     refetchOnMount: "always",

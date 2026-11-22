@@ -81,6 +81,15 @@ test("compares two revalidated multichannel CSV recordings using linked keyboard
   await page.setViewportSize({ width: 420, height: 850 });
   await expect.poll(() => comparison.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
 
+  await page.context().setOffline(true);
+  await page.getByRole("button", { name: "Revalidate sources" }).click();
+  await expect(comparison).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(2);
+  await page.context().setOffline(false);
+  await page.getByRole("button", { name: "Revalidate sources" }).click();
+  await expect(comparison).toContainText("81 exact pairs");
+  await expect(confirm).not.toBeChecked();
+
   // Change B after metadata succeeds, just as its separate Arrow read reaches the sidecar.
   const handleB = await sourceB.inputValue();
   await page.route((url) => url.pathname.endsWith(`/${handleB}/samples`), async (route) => {
