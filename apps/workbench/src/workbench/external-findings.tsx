@@ -1,3 +1,5 @@
+import { useId } from "react";
+
 import type { DiagnosticStatus, ExternalDiagnostics } from "./external-diagnostics";
 
 const STATUS_COLOR: Record<DiagnosticStatus, string> = {
@@ -8,9 +10,10 @@ const STATUS_COLOR: Record<DiagnosticStatus, string> = {
 };
 
 export function ExternalFindings({ diagnostics }: { diagnostics: ExternalDiagnostics }) {
+  const title = useId();
   return (
-    <section className="my-5" aria-labelledby="external-findings-title">
-      <h3 id="external-findings-title" className="font-display text-xl">Numerical diagnostics</h3>
+    <section className="my-5" aria-labelledby={title}>
+      <h3 id={title} className="font-display text-xl">Numerical diagnostics</h3>
       <p className="my-2 text-xs text-ink-2">
         <code>{diagnostics.version}</code> · All {diagnostics.findings[0]?.sampleCount} admitted rows · Recorded data checks
       </p>

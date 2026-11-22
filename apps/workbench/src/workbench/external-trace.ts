@@ -53,15 +53,11 @@ export function plotTicks(domain: PlotDomain, fractions: readonly number[]) {
   };
 }
 
-/** Map every visible source row to geometry before rounding coordinates for SVG. */
-export function buildTrace(
+export function signalDomain(
   rows: ExternalResult["rows"],
   indices: readonly number[],
   column: number,
-  x: (time: number) => number,
-  y: (fraction: number) => number,
-  connect: boolean,
-) {
+): PlotDomain | null {
   let min = Infinity;
   let max = -Infinity;
   for (const index of indices) {
@@ -70,7 +66,20 @@ export function buildTrace(
     min = Math.min(min, value);
     max = Math.max(max, value);
   }
-  const domain: PlotDomain | null = min <= max ? [min, max] : null;
+  return min <= max ? [min, max] : null;
+}
+
+/** Map every visible source row to geometry before rounding coordinates for SVG. */
+export function buildTrace(
+  rows: ExternalResult["rows"],
+  indices: readonly number[],
+  column: number,
+  x: (time: number) => number,
+  y: (fraction: number) => number,
+  connect: boolean,
+  scale?: { readonly domain: PlotDomain | null; readonly diamond: boolean },
+) {
+  const domain = scale === undefined ? signalDomain(rows, indices, column) : scale.domain;
   let lines = "";
   let points = "";
   let missing = "";
@@ -86,7 +95,9 @@ export function buildTrace(
       nonfinite += `M${px},9v5`;
     } else {
       const point = `${px},${y(plotFraction(value, domain!)).toFixed(2)}`;
-      points += `M${point}h0.01`;
+      points += scale?.diamond === true
+        ? `M${point}m0,-2l2,2l-2,2l-2,-2z`
+        : `M${point}h0.01`;
       if (connect) lines += `${previous === index - 1 ? "L" : "M"}${point}`;
       previous = index;
     }

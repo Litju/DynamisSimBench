@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 
 import type { ApiClient } from "../api/client";
 import { ApiClientError } from "../api/errors";
+import type { ResultEntry } from "../api/external-results";
 import { useApiClient } from "../session/provider";
 import { Button } from "../ui/button";
 import { diagnoseExternalResult } from "../workbench/external-diagnostics";
@@ -12,6 +13,10 @@ import { ExternalPlots } from "../workbench/external-plots";
 import type { ExternalResult } from "../workbench/external-samples";
 import { recordedValue } from "../workbench/external-trace";
 import { rootRoute } from "./root";
+
+const ExternalComparison = lazy(async () => ({
+  default: (await import("../workbench/external-comparison-view")).ExternalComparison,
+}));
 
 export const externalResultsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -35,6 +40,7 @@ function ExternalResultsPage() {
 function ResultBrowser({ client, workspaceId }: { client: ApiClient; workspaceId: string }) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedB, setSelectedB] = useState<string | null>(null);
   const listing = useQuery({
     queryKey: ["external-results", workspaceId],
     queryFn: () => client.listExternalResults(workspaceId),
@@ -43,6 +49,8 @@ function ResultBrowser({ client, workspaceId }: { client: ApiClient; workspaceId
   const currentList = listing.isError || listing.isFetching ? undefined : listing.data;
   const entries = currentList?.results ?? [];
   const current = selected === null ? undefined : entries.find((entry) => entry.result_id === selected);
+  const currentB = selectedB === null ? undefined : entries.find((entry) => entry.result_id === selectedB);
+  const sameSource = current !== undefined && current === currentB;
 
   return (
     <>
@@ -74,6 +82,7 @@ function ResultBrowser({ client, workspaceId }: { client: ApiClient; workspaceId
             <p role="status" className="text-rose-900">{currentList.ignored_names} CSV entries have unsupported filenames.</p>
           )}
           <ul className="space-y-1">
+            {entries.length > 0 && <li className="mt-2 text-xs font-medium text-ink-3">Select source A</li>}
             {entries.map((entry) => (
               <li key={entry.name} className="break-all">
                 {entry.result_id !== null ? (
@@ -84,7 +93,7 @@ function ResultBrowser({ client, workspaceId }: { client: ApiClient; workspaceId
                     onClick={() => {
                       if (entry === current) {
                         void queryClient.invalidateQueries({
-                          queryKey: ["external-result", workspaceId, entry.result_id],
+                          queryKey: ["external-result", workspaceId],
                         });
                       } else {
                         setSelected(entry.result_id);
@@ -102,41 +111,89 @@ function ResultBrowser({ client, workspaceId }: { client: ApiClient; workspaceId
               </li>
             ))}
           </ul>
+          {entries.some((entry) => entry.result_id !== null) && (
+            <div className="mt-3 min-w-0 border-t border-line pt-3">
+              <label htmlFor="external-source-b" className="block text-sm font-medium">Source B</label>
+              <select id="external-source-b" value={currentB?.result_id ?? ""}
+                onChange={(event) => setSelectedB(event.currentTarget.value || null)}
+                className="mt-1 w-full min-w-0 rounded border border-line bg-panel-2 p-2 text-sm">
+                <option value="">No comparison</option>
+                {entries.map((entry) => entry.result_id !== null && (
+                  <option key={entry.result_id} value={entry.result_id} disabled={entry === current}>
+                    {entry.name}
+                  </option>
+                ))}
+              </select>
+              {sameSource && <p role="status" className="mt-1 text-sm">Choose a different file for source B.</p>}
+            </div>
+          )}
+          {currentList !== undefined && selectedB !== null && currentB === undefined && (
+            <p role="status" className="mt-1 text-sm">Source B changed or became unavailable. Select its current entry.</p>
+          )}
         </section>
         <section className="min-w-0 rounded-md border border-slate-200 bg-white p-4" aria-label="Result inspection">
-          {current === undefined || current.result_id === null
-            ? currentList !== undefined && selected !== null
-              ? <p role="status">The selected source changed or became unavailable. Select a file to inspect its current data.</p>
-              : <p>Select a workspace file to inspect its recorded data.</p>
-            : <ResultInspection key={current.result_id} client={client} workspaceId={workspaceId} resultId={current.result_id} sourceName={current.name} />}
+          {currentList !== undefined && selected !== null && current === undefined && (
+            <p role="status">The selected source changed or became unavailable. Select a file to inspect its current data.</p>
+          )}
+          {current === undefined && currentB === undefined
+            ? <p>Select a workspace file to inspect its recorded data.</p>
+            : <ResultInspection key={`${current?.result_id ?? ""}:${currentB?.result_id ?? ""}`}
+                client={client} workspaceId={workspaceId} a={current} b={sameSource ? undefined : currentB} />}
         </section>
       </div>
     </>
   );
 }
 
-function ResultInspection({ client, workspaceId, resultId, sourceName }: {
+function ResultInspection({ client, workspaceId, a, b }: {
   client: ApiClient;
   workspaceId: string;
-  resultId: string;
-  sourceName: string;
+  a?: ResultEntry;
+  b?: ResultEntry;
 }) {
   const result = useQuery({
-    queryKey: ["external-result", workspaceId, resultId],
-    queryFn: async () => {
-      const result = await client.getExternalResult(workspaceId, resultId);
-      if (result.metadata.source_name !== sourceName) throw new ApiClientError("invalid_response");
-      const { decodeExternalSamples } = await import("../workbench/external-samples");
-      return decodeExternalSamples(result);
+    queryKey: ["external-result", workspaceId, a?.result_id ?? null, b?.result_id ?? null],
+    queryFn: ({ signal }) => {
+      async function read(source?: ResultEntry) {
+        if (source?.result_id == null) return null;
+        const result = await client.getExternalResult(workspaceId, source.result_id, signal);
+        if (result.metadata.source_name !== source.name) throw new ApiClientError("invalid_response");
+        signal.throwIfAborted();
+        const { decodeExternalSamples } = await import("../workbench/external-samples");
+        signal.throwIfAborted();
+        return decodeExternalSamples(result);
+      }
+      return Promise.allSettled([read(a), read(b)] as const);
     },
     retry: false,
     gcTime: 0,
     refetchOnMount: "always",
   });
-  if (result.isFetching) return <p role="status">Reading recorded samples…</p>;
-  if (result.isError) return <p role="alert">{failureMessage(result.error)}</p>;
-  if (result.data === undefined) return null;
-  return <SampleInspection result={result.data} />;
+  const [outcomeA, outcomeB] = result.isSuccess && !result.isFetching ? result.data : [];
+  const readA = outcomeA?.status === "fulfilled" ? outcomeA.value : null;
+  const readB = outcomeB?.status === "fulfilled" ? outcomeB.value : null;
+  return (
+    <>
+      {b !== undefined && (
+        <Button type="button" className="mb-2 w-auto border border-line" disabled={result.isFetching}
+          onClick={() => void result.refetch()}>Revalidate sources</Button>
+      )}
+      {result.isFetching && <p role="status">Reading recorded samples…</p>}
+      {result.isError && <p role="alert">{failureMessage(result.error)}</p>}
+      {outcomeA?.status === "rejected" && <p role="alert">{b !== undefined && "Source A · "}{failureMessage(outcomeA.reason)}</p>}
+      {outcomeB?.status === "rejected" && <p role="alert">Source B · {failureMessage(outcomeB.reason)}</p>}
+      {readA !== null && readB !== null ? (
+        <Suspense fallback={<p role="status">Opening comparison…</p>}>
+          <ExternalComparison a={readA} b={readB} />
+        </Suspense>
+      ) : (
+        <>
+          {readB !== null && <p className="mb-3 wrap-anywhere text-sm">Source B · {readB.metadata.source_name} · SHA-256 <code>{readB.metadata.source_sha256}</code>. Select a readable source A to compare.</p>}
+          {readA !== null && <SampleInspection result={readA} />}
+        </>
+      )}
+    </>
+  );
 }
 
 function failureMessage(error: unknown): string {

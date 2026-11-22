@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ResultColumn } from "../api/external-results";
 import { Button } from "../ui/button";
 import type { ExternalResult } from "./external-samples";
-import { buildTrace, plotFraction, plotTicks, plotValue, recordedValue, timeDomain, type PlotDomain } from "./external-trace";
+import { buildTrace, plotFraction, plotTicks, plotValue, recordedValue, signalDomain, timeDomain, type PlotDomain } from "./external-trace";
 
 const LEFT = 78;
 const RIGHT = 40;
@@ -13,11 +13,7 @@ const HEIGHT = 151;
 const TICK_FRACTIONS = [0, 0.5, 1];
 const CONTROL = "w-auto border border-slate-200";
 
-export function ExternalPlots({ result, connect }: { result: ExternalResult; connect: boolean }) {
-  const { metadata, rows } = result;
-  const [selected, setSelected] = useState([1]);
-  const [zoomHistory, setZoomHistory] = useState<readonly PlotDomain[]>([]);
-  const [sample, setSample] = useState(0);
+export function usePlotWidth() {
   const frame = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
   useEffect(() => {
@@ -28,6 +24,15 @@ export function ExternalPlots({ result, connect }: { result: ExternalResult; con
     observer.observe(frame.current);
     return () => observer.disconnect();
   }, []);
+  return { frame, width };
+}
+
+export function ExternalPlots({ result, connect }: { result: ExternalResult; connect: boolean }) {
+  const { metadata, rows } = result;
+  const [selected, setSelected] = useState([1]);
+  const [zoomHistory, setZoomHistory] = useState<readonly PlotDomain[]>([]);
+  const [sample, setSample] = useState(0);
+  const { frame, width } = usePlotWidth();
 
   const fullDomain = useMemo(() => timeDomain(rows), [rows]);
   const domain = zoomHistory.at(-1) ?? fullDomain;
@@ -40,11 +45,11 @@ export function ExternalPlots({ result, connect }: { result: ExternalResult; con
   const zoomed: PlotDomain = [plotValue([domain[0], cursor[0]], 0.5), plotValue([cursor[0], domain[1]], 0.5)];
   const canZoom = zoomed[0] < zoomed[1] && (zoomed[0] > domain[0] || zoomed[1] < domain[1]);
   const channels = metadata.columns.slice(1);
+  const series = useMemo(() => metadata.columns.slice(1).map((_, index) => ({
+    rows, indices, column: index + 1, connect,
+  })), [metadata.columns, rows, indices, connect]);
 
-  function inspect(event: MouseEvent<SVGSVGElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const pixel = (event.clientX - bounds.left) / bounds.width * width;
-    const position = (pixel - LEFT) / (width - LEFT - RIGHT);
+  function inspect(position: number) {
     let closest = cursorRow;
     let distance = Infinity;
     for (const index of indices) {
@@ -122,36 +127,63 @@ export function ExternalPlots({ result, connect }: { result: ExternalResult; con
       <div ref={frame} className="mt-3 grid gap-2">
         {selected.length === 0 && <p className="text-sm text-ink-2">Select a signal to show its plot.</p>}
         {channels.map((channel, index) => selected.includes(index + 1) && (
-          <SignalPlot key={channel.name} channel={channel} column={index + 1}
-            rows={rows} indices={indices} domain={domain} width={width} connect={connect}
-            cursor={cursor} inspect={inspect} />
+          <RecordedSignalPlot key={channel.name} channel={channel} a={series[index]!}
+            domain={domain} width={width} time={cursor[0]} aValue={cursor[index + 1]} inspect={inspect} />
         ))}
       </div>
     </section>
   );
 }
 
-function SignalPlot({ channel, column, rows, indices, domain, width, connect, cursor, inspect }: {
+export interface RecordedSeries {
+  readonly rows: ExternalResult["rows"];
+  readonly indices: readonly number[];
+  readonly column: number;
+  readonly connect: boolean;
+}
+
+function sharedDomain(a: RecordedSeries, b: RecordedSeries | undefined): PlotDomain | null {
+  const aDomain = signalDomain(a.rows, a.indices, a.column);
+  if (b === undefined) return aDomain;
+  const bDomain = signalDomain(b.rows, b.indices, b.column);
+  if (aDomain === null) return bDomain;
+  if (bDomain === null) return aDomain;
+  return [Math.min(aDomain[0], bDomain[0]), Math.max(aDomain[1], bDomain[1])];
+}
+
+const y = (fraction: number) => BASELINE - fraction * (BASELINE - TOP);
+
+export function RecordedSignalPlot({ channel, a, b, domain, width, time, aValue, bValue, inspect }: {
   channel: ResultColumn;
-  column: number;
-  rows: ExternalResult["rows"];
-  indices: readonly number[];
+  a: RecordedSeries;
+  b?: RecordedSeries;
   domain: PlotDomain;
   width: number;
-  connect: boolean;
-  cursor: ExternalResult["rows"][number];
-  inspect: (event: MouseEvent<SVGSVGElement>) => void;
+  time: number;
+  aValue: number | null | undefined;
+  bValue?: number | null;
+  inspect: (fraction: number) => void;
 }) {
   const span = width - LEFT - RIGHT;
-  const x = (time: number) => LEFT + plotFraction(time, domain) * span;
-  const y = (fraction: number) => BASELINE - fraction * (BASELINE - TOP);
-  const trace = useMemo(() => buildTrace(rows, indices, column, (time) =>
-    LEFT + plotFraction(time, domain) * span, y, connect), [rows, indices, column, domain, span, connect]);
+  const height = HEIGHT + (b === undefined ? 0 : 18);
+  const { valueDomain, traceA, traceB } = useMemo(() => {
+    const valueDomain = sharedDomain(a, b);
+    const x = (time: number) => LEFT + plotFraction(time, domain) * span;
+    return {
+      valueDomain,
+      traceA: buildTrace(a.rows, a.indices, a.column, x, y, a.connect, { domain: valueDomain, diamond: false }),
+      traceB: b === undefined ? null
+        : buildTrace(b.rows, b.indices, b.column, x, y, b.connect, { domain: valueDomain, diamond: true }),
+    };
+  }, [a, b, domain, span]);
   const timeAxis = plotTicks(domain, width < 420 ? [0, 1] : TICK_FRACTIONS);
-  const valueAxis = trace.domain === null ? null : plotTicks(trace.domain, TICK_FRACTIONS);
-  const cursorValue = cursor[column]!;
-  const cursorX = x(cursor[0]);
+  const valueAxis = valueDomain === null ? null : plotTicks(valueDomain, TICK_FRACTIONS);
+  const cursorX = LEFT + plotFraction(time, domain) * span;
   const title = `${channel.name} [${channel.unit}]`;
+  const aY = valueDomain !== null && typeof aValue === "number" && Number.isFinite(aValue)
+    ? y(plotFraction(aValue, valueDomain)) : null;
+  const bY = valueDomain !== null && typeof bValue === "number" && Number.isFinite(bValue)
+    ? y(plotFraction(bValue, valueDomain)) : null;
 
   return (
     <figure className="min-w-0 rounded border border-line bg-scene py-2">
@@ -163,13 +195,30 @@ function SignalPlot({ channel, column, rows, indices, domain, width, connect, cu
         {valueAxis?.origin != null && (
           <span className="text-xs text-ink-2">Value ticks relative to {recordedValue(valueAxis.origin)} [{channel.unit}]</span>
         )}
-        {trace.domain === null && <span className="text-xs text-ink-2">No finite values in view</span>}
-        {trace.missing !== "" && <span className="text-xs text-warn">Missing · upper marks</span>}
-        {trace.nonfinite !== "" && <span className="text-xs text-err">Nonfinite · lower marks</span>}
+        {valueDomain === null && <span className="text-xs text-ink-2">No finite values in view</span>}
+        {traceB === null ? (
+          <>
+            {traceA.missing !== "" && <span className="text-xs text-warn">Missing · upper marks</span>}
+            {traceA.nonfinite !== "" && <span className="text-xs text-err">Nonfinite · lower marks</span>}
+          </>
+        ) : (
+          <>
+            <span className="text-xs text-ext">● A</span>
+            <span className="text-xs text-fix">◇ B</span>
+            {(traceA.missing || traceA.nonfinite || traceB.missing || traceB.nonfinite) &&
+              <span className="text-xs text-ink-2">Marks below axis · A above B</span>}
+          </>
+        )}
       </figcaption>
-      <svg viewBox={`0 0 ${width} ${HEIGHT}`} width="100%" height={HEIGHT}
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height}
         preserveAspectRatio="none" role="img"
-        aria-label={`${title} over time [s]`} onClick={inspect} className="block cursor-crosshair">
+        aria-label={`${b === undefined ? "" : "A and B · "}${title} over time [s]`}
+        onClick={(event) => {
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const pixel = (event.clientX - bounds.left) / bounds.width * width;
+          inspect((pixel - LEFT) / span);
+        }}
+        className="block cursor-crosshair">
         <g className="fill-ink-3 font-mono text-[10px]">
           {valueAxis?.ticks.map(({ label, fraction }) => (
             <g key={label}>
@@ -178,25 +227,41 @@ function SignalPlot({ channel, column, rows, indices, domain, width, connect, cu
             </g>
           ))}
           {timeAxis.ticks.map(({ label, fraction }) => (
-            <text key={label} x={LEFT + fraction * span} y={HEIGHT - 6}
+            <text key={label} x={LEFT + fraction * span} y={height - 6}
               textAnchor={fraction === 1 ? "end" : "middle"}>{label}</text>
           ))}
-          <text x={width - 5} y={HEIGHT - 6} textAnchor="end">s</text>
+          <text x={width - 5} y={height - 6} textAnchor="end">s</text>
         </g>
         <line x1={LEFT} x2={width - RIGHT} y1={BASELINE} y2={BASELINE} className="stroke-line-2" />
-        <path d={trace.lines} fill="none" className="stroke-ext" strokeWidth={1.4} />
-        <path d={trace.points} fill="none" className="stroke-ext" strokeLinecap="round"
-          strokeWidth={connect && indices.length > 150 ? 1.3 : 3} />
-        <g transform={`translate(0, ${BASELINE + 2})`}>
-          <path d={trace.missing} className="stroke-warn" strokeWidth={2} />
-          <path d={trace.nonfinite} className="stroke-err" strokeWidth={2} />
-        </g>
-        <line x1={cursorX} x2={cursorX} y1={TOP} y2={BASELINE + 16} className="stroke-accent" strokeDasharray="3 3" />
-        {trace.domain !== null && cursorValue !== null && Number.isFinite(cursorValue) && (
-          <circle cx={cursorX} cy={y(plotFraction(cursorValue, trace.domain))} r={4}
+        <path d={traceA.lines} fill="none" className="stroke-ext" strokeWidth={1.4} />
+        <path d={traceA.points} fill="none" className="stroke-ext" strokeLinecap="round"
+          strokeWidth={a.indices.length > 150 ? 1.3 : 3} />
+        <InvalidMarks trace={traceA} top={BASELINE + 2} />
+        {traceB !== null && (
+          <>
+            <path d={traceB.lines} fill="none" className="stroke-fix" strokeWidth={1.4} strokeDasharray="4 3" />
+            <path d={traceB.points} fill="none" className="stroke-fix" />
+            <InvalidMarks trace={traceB} top={BASELINE + 20} />
+          </>
+        )}
+        <line x1={cursorX} x2={cursorX} y1={TOP} y2={height - 21} className="stroke-accent" strokeDasharray="3 3" />
+        {aY !== null && (
+          <circle cx={cursorX} cy={aY} r={4}
             className="fill-scene stroke-accent" strokeWidth={2} />
+        )}
+        {bY !== null && (
+          <path d={`M${cursorX},${bY - 6}l6,6l-6,6l-6,-6z`} fill="none" className="stroke-fix" strokeWidth={2} />
         )}
       </svg>
     </figure>
+  );
+}
+
+function InvalidMarks({ trace, top }: { trace: ReturnType<typeof buildTrace>; top: number }) {
+  return (
+    <g transform={`translate(0, ${top})`}>
+      <path d={trace.missing} className="stroke-warn" strokeWidth={2} />
+      <path d={trace.nonfinite} className="stroke-err" strokeWidth={2} />
+    </g>
   );
 }

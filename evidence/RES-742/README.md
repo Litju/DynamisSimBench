@@ -2,6 +2,19 @@
 
 [Linear issue](https://linear.app/alignerr-cmj/issue/RES-742/db-app-01-first-usable-simulation-agnostic-diagnostic-workspace) · [Accepted roadmap](https://linear.app/alignerr-cmj/document/dynamisbench-roadmap-and-delivery-governance-simulation-agnostic-03b89000a9ef)
 
+## Gate 3 — Compare external results
+
+1. Copy [damped-oscillator.csv](../../apps/workbench/e2e/data/external-results/damped-oscillator.csv) and [damped-oscillator-double-amplitude.csv](../../apps/workbench/e2e/data/external-results/damped-oscillator-double-amplitude.csv) into the opened workspace's `external-results/` folder. Choose **Modules → Workspace & Models → External results**. Set the first file as A and the double-amplitude file as B. B uses twice the recorded signal values and a different column order, with the same 81 recorded times.
+2. Check both SHA-256 digests. **Timebase and overlap** shows 81 exact pairs over 0–4 s. Select **position** and **velocity**. Use **Inspect comparison time** or click a plot. Both plots follow the same cursor and zoom. Verify the source row numbers in the readout.
+3. Confirm the shared origin, scale, frame and quantity definitions for these fixtures. At 0.05 s, position reads 0.99 m in A, 1.98 m in B and 0.99 m as B − A. Velocity reads −0.2, −0.4 and −0.2 m/s. Clear the confirmation to withhold the deltas.
+4. Select the scalar decay as B for an unsupported quantity comparison. Restore the oscillator variant, change a value in that file and choose **Revalidate sources**. Verify the refusal, then **Refresh results** and select the updated entry to compare its current bytes.
+5. Run `pnpm --filter @dynamisbench/workbench run test:e2e external-comparison.spec.ts` to exercise the same secured browser flow and the partial, disjoint, ambiguous and corrupt cases. The test also compares two 20,000-row sources. Set `DYNAMISBENCH_RESULTS_SCREENSHOTS` to a local directory to capture the views.
+
+Comparison v1 matches exact column names, declared units and canonical unit metadata. Its shared cursor visits the union of recorded times. Exact timestamp equality is evaluated after binary64 decoding, including equality of signed zeros. Distinct decoded timestamps remain distinct regardless of spacing. Repeated or reversed timestamps make the timebase unsupported. A delta requires a confirmed comparison, an exact timestamp pair, two finite values and a finite subtraction result. Blanks, nonfinite values and unmatched timestamps remain visible. The method uses the recorded values at their original times and scales.
+
+- [Oscillator overlays, provenance and deltas](gate-3-oscillator-comparison.png)
+- [Partial-grid comparison and a nonfinite refusal](gate-3-partial-grid.png)
+
 ## Gate 2 — Plots and numerical diagnostics
 
 1. Open both fixture CSVs using the Gate 1 steps below. On scalar decay, move the **Inspect sample** slider one row with the right arrow. Row 2 shows 0.05 s and 0.9375 mol/m³. Zoom in, then zoom out to restore the original time span.
@@ -16,7 +29,7 @@ Diagnostics v1 checks admitted binary64 values. Sampling regularity uses a relat
 
 ## Gate 1 — Source admission and inspection
 
-1. Open a workspace with distinct source and evidence roots. In the source root, create an `external-results/` folder and copy both [fixture CSVs](../../apps/workbench/e2e/data/external-results/) into it.
+1. Open a workspace with distinct source and evidence roots. In the source root, create an `external-results/` folder and copy the [scalar decay and damped oscillator CSVs](../../apps/workbench/e2e/data/external-results/) into it.
 2. Choose **Modules → Workspace & Models → External results**. Select each CSV. Inspect its time and signal columns, cycle through the sample pages, and compare the visible SHA-256 to the output of `Get-FileHash -Algorithm SHA256` or `sha256sum` on the file.
 3. Update one CSV on disk. Select the changed file using its old listing entry. Verify the change refusal, then choose **Refresh results** and reselect the file to read the new bytes.
 4. Run the focused browser test above for the admission and revalidation workflow.

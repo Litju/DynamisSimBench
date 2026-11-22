@@ -131,7 +131,7 @@ export interface ApiClient {
   /** `GET /api/v1/workspaces/{workspaceId}/artifacts/{artifactId}` */
   getArtifact(workspaceId: string, artifactId: string): Promise<ArtifactInspectionResponse>;
   listExternalResults(workspaceId: string): Promise<ResultList>;
-  getExternalResult(workspaceId: string, resultId: string): Promise<ExternalResultPayload>;
+  getExternalResult(workspaceId: string, resultId: string, signal?: AbortSignal): Promise<ExternalResultPayload>;
   /**
    * `GET /api/v1/events` as a live stream.
    *
@@ -238,7 +238,7 @@ export function createApiClient(
    */
   async function send<T>(
     path: string,
-    init: { method: string; headers?: Headers; body?: string },
+    init: { method: string; headers?: Headers; body?: string; signal?: AbortSignal },
     decode: (body: unknown) => T | null,
   ): Promise<T> {
     let response: Response;
@@ -253,6 +253,7 @@ export function createApiClient(
         body: init.body,
         credentials: "omit",
         cache: "no-store",
+        ...(init.signal === undefined ? {} : { signal: init.signal }),
       });
     } catch {
       // The implementation's own failure is not read: its text is where a URL, a platform
@@ -280,7 +281,7 @@ export function createApiClient(
   }
 
   /** One binary read: the same request, refusal and bounds, with the bytes as the answer. */
-  async function sendBinary(path: string, mediaType: string, limit: number): Promise<Uint8Array> {
+  async function sendBinary(path: string, mediaType: string, limit: number, signal?: AbortSignal): Promise<Uint8Array> {
     let response: Response;
     try {
       response = await fetchImpl(url(path), {
@@ -288,6 +289,7 @@ export function createApiClient(
         headers: { Accept: mediaType, Authorization: authorization },
         credentials: "omit",
         cache: "no-store",
+        ...(signal === undefined ? {} : { signal }),
       });
     } catch {
       throw new ApiClientError("network");
@@ -366,11 +368,11 @@ export function createApiClient(
       return await send(externalResultsPath(workspaceId), { method: "GET" }, decodeResultList);
     },
 
-    async getExternalResult(workspaceId, resultId): Promise<ExternalResultPayload> {
+    async getExternalResult(workspaceId, resultId, signal): Promise<ExternalResultPayload> {
       const path = externalResultsPath(workspaceId, resultId);
-      const metadata = await send(path, { method: "GET" }, decodeResultMetadata);
+      const metadata = await send(path, { method: "GET", signal }, decodeResultMetadata);
       if (metadata.result_id !== resultId) throw new ApiClientError("invalid_response");
-      const bytes = await sendBinary(`${path}/samples`, FRAME_STREAM_MEDIA_TYPE, MAX_FRAME_STREAM_BYTES);
+      const bytes = await sendBinary(`${path}/samples`, FRAME_STREAM_MEDIA_TYPE, MAX_FRAME_STREAM_BYTES, signal);
       return { metadata, bytes };
     },
 
