@@ -66,6 +66,8 @@ function stubClient() {
           content: null,
         }) satisfies ArtifactInspectionResponse,
     ),
+    listExternalResults: vi.fn(),
+    getExternalResult: vi.fn(),
     streamEvents: () => (async function* () {})(),
     laboratoryIndex: vi.fn(),
     laboratoryModel: vi.fn(),
