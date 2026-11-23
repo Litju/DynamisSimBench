@@ -204,6 +204,14 @@ def _last_error() -> int:
     return int(getter()) if getter is not None else 0
 
 
+def _system32_tool(name: str) -> str:
+    root = os.environ.get("SYSTEMROOT") or os.environ.get("SystemRoot") or "C:/Windows"
+    candidate = Path(root) / "System32" / name
+    if not candidate.is_file():
+        raise AppContainerError(f"the system tool {name!r} is not present in System32")
+    return str(candidate)
+
+
 def _check_bool(ok: Any, what: str) -> None:
     if not ok:
         error = _last_error()
@@ -254,6 +262,8 @@ def _configure_kernel32() -> None:
     api = _kernel32()
     api.CloseHandle.argtypes = [wintypes.HANDLE]
     api.CloseHandle.restype = wintypes.BOOL
+    api.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    api.TerminateProcess.restype = wintypes.BOOL
     api.LocalFree.argtypes = [ctypes.c_void_p]
     api.LocalFree.restype = ctypes.c_void_p
     api.GetCurrentProcess.argtypes = []
@@ -461,7 +471,7 @@ def grant_tree(path: Path, sid_string: str, access: str) -> None:
         raise AppContainerError("an AppContainer grant target is not a directory")
     user = current_user_sid()
     command = [
-        "icacls",
+        _system32_tool("icacls.exe"),
         str(path),
         "/inheritance:r",
         "/grant:r",
@@ -625,20 +635,26 @@ def _token_observation(pid: int, expected_sid: str) -> dict[str, object]:
                 if container_info.TokenAppContainer:
                     container_sid = _sid_to_string(container_info.TokenAppContainer)
         elevation = wintypes.DWORD(0)
-        advapi.GetTokenInformation(
-            token,
-            _TOKEN_ELEVATION,
-            ctypes.byref(elevation),
-            ctypes.sizeof(elevation),
-            ctypes.byref(size),
+        _check_bool(
+            advapi.GetTokenInformation(
+                token,
+                _TOKEN_ELEVATION,
+                ctypes.byref(elevation),
+                ctypes.sizeof(elevation),
+                ctypes.byref(size),
+            ),
+            "GetTokenInformation(TokenElevation)",
         )
         restricted = wintypes.DWORD(0)
-        advapi.GetTokenInformation(
-            token,
-            _TOKEN_IS_RESTRICTED,
-            ctypes.byref(restricted),
-            ctypes.sizeof(restricted),
-            ctypes.byref(size),
+        _check_bool(
+            advapi.GetTokenInformation(
+                token,
+                _TOKEN_IS_RESTRICTED,
+                ctypes.byref(restricted),
+                ctypes.sizeof(restricted),
+                ctypes.byref(size),
+            ),
+            "GetTokenInformation(TokenIsRestricted)",
         )
         return {
             "is_appcontainer": bool(is_container.value),
@@ -700,6 +716,7 @@ class AppContainerProcess:
         attribute_buffer: Any = None
         attribute_initialized = False
         pipes: list[Any] = []
+        process_info = _ProcessInformation()
         try:
             security = _SecurityAttributes(ctypes.sizeof(_SecurityAttributes), None, True)
             stdin_read, stdin_write = wintypes.HANDLE(), wintypes.HANDLE()
@@ -767,7 +784,6 @@ class AppContainerProcess:
                 environment_block = _environment_block(environment)
                 environment_pointer = ctypes.cast(environment_block, ctypes.c_void_p)
                 environment_flags = _CREATE_UNICODE_ENVIRONMENT
-            process_info = _ProcessInformation()
             _check_bool(
                 api.CreateProcessW(
                     str(application),
@@ -822,6 +838,8 @@ class AppContainerProcess:
             )
             return instance
         except BaseException:
+            if process_info.hProcess:
+                api.TerminateProcess(process_info.hProcess, 1)
             for handle in process_handles:
                 api.CloseHandle(handle)
             if thread_handle:
