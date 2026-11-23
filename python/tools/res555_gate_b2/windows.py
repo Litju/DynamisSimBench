@@ -200,13 +200,23 @@ def _userenv() -> Any:
 
 
 def _last_error() -> int:
-    return int(ctypes.get_last_error())
+    getter = getattr(ctypes, "get_last_error", None)
+    return int(getter()) if getter is not None else 0
 
 
 def _check_bool(ok: Any, what: str) -> None:
     if not ok:
         error = _last_error()
-        raise AppContainerError(f"{what} failed: {error} {ctypes.FormatError(error)}")
+        formatter = getattr(ctypes, "FormatError", None)
+        detail = f" {formatter(error)}" if formatter is not None else ""
+        raise AppContainerError(f"{what} failed: {error}{detail}")
+
+
+def _open_osfhandle(handle: int, flags: int) -> int:
+    opener = getattr(msvcrt, "open_osfhandle", None)
+    if opener is None:
+        raise AppContainerError("msvcrt.open_osfhandle is unavailable")
+    return int(opener(handle, flags))
 
 
 def _check_hr(hr: int, what: str) -> None:
@@ -796,17 +806,17 @@ class AppContainerProcess:
             instance.returncode = None
             instance.token_observation = observation
             instance.stdin = os.fdopen(
-                msvcrt.open_osfhandle(_handle_value(stdin_write), os.O_WRONLY),
+                _open_osfhandle(_handle_value(stdin_write), os.O_WRONLY),
                 "wb",
                 buffering=0,
             )
             instance.stdout = os.fdopen(
-                msvcrt.open_osfhandle(_handle_value(stdout_read), os.O_RDONLY),
+                _open_osfhandle(_handle_value(stdout_read), os.O_RDONLY),
                 "rb",
                 buffering=0,
             )
             instance.stderr = os.fdopen(
-                msvcrt.open_osfhandle(_handle_value(stderr_read), os.O_RDONLY),
+                _open_osfhandle(_handle_value(stderr_read), os.O_RDONLY),
                 "rb",
                 buffering=0,
             )

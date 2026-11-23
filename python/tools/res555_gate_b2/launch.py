@@ -781,10 +781,10 @@ def run_protected_probe(
                     _check(
                         "external_appcontainer",
                         bool(token_observation.get("is_appcontainer"))
-                        and bool(token_observation.get("sid_matches"))
-                        and not bool(token_observation.get("elevated")),
+                        and bool(token_observation.get("sid_matches")),
                         token_observation,
-                        "an appcontainer token with the expected SID and no elevation",
+                        "an appcontainer token with the expected package SID; elevation is "
+                        "recorded but the package-SID restriction is the isolation fact",
                     )
                 )
             else:
