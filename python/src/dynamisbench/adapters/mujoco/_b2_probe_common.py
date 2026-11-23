@@ -376,9 +376,7 @@ def measure_runtime_identity(
     bytes that actually execute.
     """
     resolved_executable = executable.resolve()
-    executable_size, executable_digest = sha256_file(
-        resolved_executable, allow_hardlinks=True
-    )
+    executable_size, executable_digest = sha256_file(resolved_executable, allow_hardlinks=True)
     del executable_size
     exclude = (
         (f"dynamisbench/adapters/mujoco/{model_asset_relative}",) if model_asset_relative else ()
