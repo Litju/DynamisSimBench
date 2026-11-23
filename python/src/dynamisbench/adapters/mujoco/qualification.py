@@ -3,14 +3,16 @@
 This module is not part of the production worker and is deliberately excluded from the
 adapter implementation identity. It exists so the scientific qualification suite can run
 the *same* physics implementation at several timesteps, retain the full nominal trajectory,
-and compare it with an independent nonlinear pendulum solution. It accepts no paths, no
-model selection and no arbitrary command; the only modes are the fixed qualification run
-and the non-finite guard probe.
+compare the materialized compiler with the packaged path, and compare it with an
+independent nonlinear pendulum solution. It accepts no paths, no
+model selection and no arbitrary command; the only modes are the fixed qualification run,
+the non-finite guard probe and the materialized-compiler parity observation.
 
 Run it in the isolated worker environment:
 
     python -I -m dynamisbench.adapters.mujoco.qualification
     python -I -m dynamisbench.adapters.mujoco.qualification --nonfinite-check
+    python -I -m dynamisbench.adapters.mujoco.qualification --materialized-parity
 """
 
 from __future__ import annotations

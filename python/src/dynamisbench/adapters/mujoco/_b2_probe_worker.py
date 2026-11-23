@@ -131,8 +131,13 @@ def _probe_write(path: str, name: str):
             name=name, expectation="denied", observed="denied", detail="PermissionError"
         )
     except OSError as error:
+        winerror = getattr(error, "winerror", None)
+        if error.errno == 13 or winerror == 5:
+            return ProbeObservation(
+                name=name, expectation="denied", observed="denied", detail="access denied"
+            )
         return ProbeObservation(
-            name=name, expectation="denied", observed="denied", detail=type(error).__name__
+            name=name, expectation="denied", observed="error", detail=type(error).__name__
         )
     return ProbeObservation(
         name=name, expectation="denied", observed="allowed", detail="write succeeded"
@@ -149,8 +154,13 @@ def _probe_delete(path: str, name: str):
             name=name, expectation="denied", observed="denied", detail="PermissionError"
         )
     except OSError as error:
+        winerror = getattr(error, "winerror", None)
+        if error.errno == 13 or winerror == 5:
+            return ProbeObservation(
+                name=name, expectation="denied", observed="denied", detail="access denied"
+            )
         return ProbeObservation(
-            name=name, expectation="denied", observed="denied", detail=type(error).__name__
+            name=name, expectation="denied", observed="error", detail=type(error).__name__
         )
     return ProbeObservation(
         name=name, expectation="denied", observed="allowed", detail="unlink succeeded"
@@ -236,6 +246,8 @@ def _probes(config: dict[str, Any], targets, inputs_root: Path):
         _probe_delete(path, f"forbidden_delete_{index}")
         for index, path in enumerate(targets.forbidden_deletes)
     )
+    package_path = Path(reference.__file__).resolve().parent / reference.MODEL_ASSET_PATH
+    package_present = package_path.exists()
     try:
         reference.model_bytes()
     except reference.ReferenceModelError:
@@ -244,7 +256,11 @@ def _probes(config: dict[str, Any], targets, inputs_root: Path):
                 name="package_model_asset",
                 expectation="denied",
                 observed="denied",
-                detail="the packaged XML is absent from the sandbox",
+                detail=(
+                    "the packaged XML is present but not the reviewed bytes"
+                    if package_present
+                    else "the packaged XML is absent from the sandbox"
+                ),
             )
         )
     except Exception as error:  # noqa: BLE001
@@ -362,11 +378,12 @@ def _run_materialized(
     from dynamisbench.adapters.mujoco._b2_probe_common import ModelConsumption, PhysicsObservation
 
     mass, distance, inertia = physics.hinge_parameters(model)
+    package_path = Path(reference.__file__).resolve().parent / reference.MODEL_ASSET_PATH
     model_consumption = ModelConsumption(
         logical_path=view.asset_path,
         size_bytes=view.asset_size_bytes,
         sha256=view.asset_sha256,
-        package_asset_present=False,
+        package_asset_present=package_path.exists(),
         package_asset_probe="denied",
         compiled={
             "nq": int(model.nq),
