@@ -58,6 +58,7 @@ CI sets it and treats an unavailable mechanism as a failure. There is no A1 fall
   checks; Linux uses `RLIMIT_FSIZE`/`RLIMIT_AS` and post-exit checks).
 - No vendor-authenticated wheels or interpreter binary. The closure is a measured snapshot,
   not a signature.
+- On an elevated CI runner the AppContainer token can report `elevated=true`; the probe records that fact but does not treat it as isolation. The package-SID/restricted-token file access, the explicit DACLs and the in-worker denial probes are the evidence. A non-elevated local run records `elevated=false` and the same denials.
 - On Windows the AppContainer's inherited environment is sanitized by the measured bootstrap
   because `CreateProcessW` in an AppContainer rejected explicit environment blocks on the
   qualified host. `-I` ignores Python environment overrides and the AppContainer denies the

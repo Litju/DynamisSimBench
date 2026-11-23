@@ -43,7 +43,7 @@ REQUIRED_ADR025_GATES = (
     "frontend",
     "desktop",
 )
-ADDITIONAL_NON_GATE_JOBS = ("mujoco-receipt-comparison",)
+ADDITIONAL_NON_GATE_JOBS = ("mujoco-receipt-comparison", "res555-gate-b2-comparison")
 
 # Pinned images, deliberately never ``-latest``: a qualification result has to be
 # interpretable against a named runner image. ``self-hosted`` is not a portable
@@ -183,6 +183,16 @@ def test_the_receipt_comparator_is_an_additional_non_gate_job() -> None:
     assert set(_resolved_images(job)) != PORTABLE_TARGETS
 
 
+def test_the_gate_b2_comparator_is_an_additional_non_gate_job() -> None:
+    """RES-555 probe evidence is additional acceptance evidence, not a ninth gate."""
+    job = _gates()["res555-gate-b2-comparison"]
+    assert job["name"] == "res555-gate-b2-comparison"
+    assert job["needs"] == "python"
+    assert set(_resolved_images(job)) <= APPROVED_HOSTED_IMAGES
+    assert set(_resolved_images(job)) != PORTABLE_TARGETS
+    assert "res555-gate-b2-comparison" in ADDITIONAL_NON_GATE_JOBS
+
+
 PYTHON_VERSION_FILE = REPO_ROOT / "python" / ".python-version"
 SETUP_UV = "astral-sh/setup-uv"
 # The inputs a setup action would have to be given to name a Python, none of which belongs here:
@@ -311,6 +321,12 @@ EXPECTED_ARTIFACTS: dict[str, tuple[dict[str, object], ...]] = {
             "retention-days": 90,
         },
         {
+            "name": "res555-gate-b2-${{ matrix.name }}",
+            "path": "python/evidence/res555-gate-b2/",
+            "if-no-files-found": "error",
+            "retention-days": 90,
+        },
+        {
             "name": "m1-qualification-${{ matrix.name }}",
             "path": "python/evidence/m1-qualification-${{ matrix.name }}.json",
             "if-no-files-found": "error",
@@ -335,6 +351,14 @@ EXPECTED_ARTIFACTS: dict[str, tuple[dict[str, object], ...]] = {
         {
             "name": "mujoco-receipt-comparison",
             "path": "python/evidence/mujoco-receipt-comparison.json",
+            "if-no-files-found": "error",
+            "retention-days": 90,
+        },
+    ),
+    "res555-gate-b2-comparison": (
+        {
+            "name": "res555-gate-b2-comparison",
+            "path": "python/evidence/res555-gate-b2-comparison.json",
             "if-no-files-found": "error",
             "retention-days": 90,
         },
