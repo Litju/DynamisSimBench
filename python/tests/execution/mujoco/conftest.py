@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -72,24 +73,30 @@ def b2_runtime():
             pytest.fail(message)
         pytest.skip(message)
     platform_tag = reference.platform_tag()
-    if os.name == "nt":
-        from tools.res555_gate_b2.windows import AppContainerProfile
+    registry = Path(tempfile.mkdtemp(prefix="res555-b2-registry-"))
+    try:
+        if os.name == "nt":
+            from tools.res555_gate_b2.windows import AppContainerProfile
 
-        profile = AppContainerProfile.create(f"DynamisBench.RES555.{uuid.uuid4().hex[:16]}")
-        try:
-            runtime = prepare_runtime(
-                worker_python=worker_python(),
-                root=profile.folder / "runtime",
-                platform_tag=platform_tag,
-            )
-            yield profile, runtime
-        finally:
-            profile.delete()
-    else:
-        with tempfile.TemporaryDirectory(prefix="res555-gate-b2-runtime-") as temporary:
-            runtime = prepare_runtime(
-                worker_python=worker_python(),
-                root=Path(temporary) / "runtime",
-                platform_tag=platform_tag,
-            )
-            yield None, runtime
+            profile = AppContainerProfile.create(f"DynamisBench.RES555.{uuid.uuid4().hex[:16]}")
+            try:
+                runtime = prepare_runtime(
+                    worker_python=worker_python(),
+                    root=profile.folder / "runtime",
+                    platform_tag=platform_tag,
+                    registry_root=registry,
+                )
+                yield profile, runtime
+            finally:
+                profile.delete()
+        else:
+            with tempfile.TemporaryDirectory(prefix="res555-gate-b2-runtime-") as temporary:
+                runtime = prepare_runtime(
+                    worker_python=worker_python(),
+                    root=Path(temporary) / "runtime",
+                    platform_tag=platform_tag,
+                    registry_root=registry,
+                )
+                yield None, runtime
+    finally:
+        shutil.rmtree(registry, ignore_errors=True)

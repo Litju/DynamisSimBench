@@ -113,6 +113,20 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
             "one equal SHA-256",
         ),
         _check(
+            "windows_qualified_trajectory",
+            windows.numerical_reference is not None
+            and windows.numerical_reference.get("matches") is True,
+            None if windows.numerical_reference is None else windows.numerical_reference,
+            "the supervisor's comparison with the qualified reference",
+        ),
+        _check(
+            "linux_qualified_trajectory",
+            linux.numerical_reference is not None
+            and linux.numerical_reference.get("matches") is True,
+            None if linux.numerical_reference is None else linux.numerical_reference,
+            "the supervisor's comparison with the qualified reference",
+        ),
+        _check(
             "steps",
             windows_physics is not None
             and linux_physics is not None

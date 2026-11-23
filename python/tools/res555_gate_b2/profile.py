@@ -41,6 +41,7 @@ def build_profile(platform_tag: str) -> IsolationProfile:
             platform=platform_tag,
             mechanism="windows-appcontainer",
             worker_principal="appcontainer-package-sid",
+            network_scope="no AppContainer network capability; outbound TCP/UDP denied",
             memory_limit_bytes=_MEMORY_LIMIT_BYTES,
             cpu_time_seconds=_CPU_TIME_SECONDS,
             wall_time_seconds=_WALL_TIME_SECONDS,
@@ -54,12 +55,19 @@ def build_profile(platform_tag: str) -> IsolationProfile:
             platform=platform_tag,
             mechanism="linux-landlock",
             worker_principal="same-uid-irreversible-landlock-domain",
+            network_scope=(
+                "Landlock TCP bind/connect denied; UDP, raw and Unix-domain sockets are "
+                "not restricted by this profile"
+            ),
             memory_limit_bytes=_MEMORY_LIMIT_BYTES,
             cpu_time_seconds=_CPU_TIME_SECONDS,
             wall_time_seconds=_WALL_TIME_SECONDS,
             max_stdout_bytes=_MAX_STDOUT_BYTES,
             max_stderr_bytes=_MAX_STDERR_BYTES,
             max_scratch_bytes=_MAX_SCRATCH_BYTES,
-            max_processes=_MAX_PROCESSES,
+            # No Linux process-count bound is enforced in this increment. A cgroup or
+            # equivalent supervisor-owned limit is required before production; recording
+            # ``None`` is honest, while inheriting the Windows number would not be.
+            max_processes=None,
         )
     raise ValueError(f"the probe has no isolation profile for {platform_tag!r}")

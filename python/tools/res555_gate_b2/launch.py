@@ -41,6 +41,7 @@ from dynamisbench.adapters.mujoco._b2_probe_common import (
     summarize_runtime,
     write_canonical_atomic,
 )
+from dynamisbench.evidence.bundle import is_link_or_reparse_point
 from dynamisbench.execution import (
     PreparedExecutionInputs,
     WorkerEnvironmentManifest,
@@ -89,7 +90,7 @@ def consume_attempt(runtime: ProtectedRuntime, nonce: str, binding_sha256: str) 
     The marker is supervisor-owned and outside the sandbox. It is intentionally not
     removed after the run: a second use of the same binding is the replay this refuses.
     """
-    attempts = runtime.root.parent / "attempts"
+    attempts = runtime.registry_root
     attempts.mkdir(parents=True, exist_ok=True)
     marker = attempts / f"{nonce}.used"
     try:
@@ -287,6 +288,40 @@ def _terminate(process: Any, tree: PosixProcessTree | None, *, windows: bool) ->
     return reaped, cleaned
 
 
+def _scratch_usage(scratch: Path) -> tuple[int, int, int]:
+    """Measure the worker scratch after exit: bytes, regular files and link objects.
+
+    An entry the supervisor cannot measure is counted as a link object, so the acceptance
+    check ``links == 0`` fails closed instead of silently undercounting unreadable bytes.
+    """
+    total = 0
+    files = 0
+    links = 0
+    pending = [scratch]
+    while pending:
+        current = pending.pop()
+        try:
+            entries = list(os.scandir(current))
+        except OSError:
+            links += 1
+            continue
+        for entry in entries:
+            path = Path(entry.path)
+            try:
+                if is_link_or_reparse_point(path):
+                    links += 1
+                elif entry.is_dir(follow_symlinks=False):
+                    pending.append(path)
+                elif entry.is_file(follow_symlinks=False):
+                    total += entry.stat(follow_symlinks=False).st_size
+                    files += 1
+                else:
+                    links += 1
+            except OSError:
+                links += 1
+    return total, files, links
+
+
 def _create_sentinel(root: Path, token: str, *, create_root: bool) -> Path:
     if create_root:
         root.mkdir(parents=True, exist_ok=True)
@@ -312,6 +347,10 @@ def _linux_allowlists(
     ]
     read_execute = [str(path) for path in system if path.exists()]
     read_execute.append(str(runtime.base_prefix))
+    # The Linux launch path is the provisioned venv interpreter, which may be a symlink
+    # into the base installation. Allow both the link's own directory and the resolved
+    # target directory so the kernel can open either form.
+    read_execute.append(str(runtime.interpreter.parent))
     read_execute.append(str(runtime.interpreter.resolve().parent))
     read_only = [
         str(runtime.site_packages),
@@ -337,10 +376,40 @@ def run_protected_probe(
     force_mechanism_unavailable: bool = False,
     tamper: Any | None = None,
     view_tamper: Any | None = None,
+    expected_trajectory_sha256: str | None = None,
     evidence_dir: Path | None = None,
+    evidence_name: str | None = None,
 ) -> ProbeLaunchResult:
-    """Verify, launch and observe one probe attempt, or refuse before any process."""
+    """Verify, launch and observe one probe attempt, or refuse before any process.
+
+    A materialized attempt must name the independently qualified trajectory digest.
+    ``evidence_name`` is required whenever ``evidence_dir`` is set and is a plain ``.json``
+    file name; only the positive materialized test names the acceptance observation.
+    """
     assert_probe_authorized()
+    if evidence_dir is not None and evidence_name is None:
+        raise ProtectedLaunchError(
+            "an evidence directory requires an explicit per-attempt evidence name; "
+            "a later test must not overwrite the acceptance observation"
+        )
+    if evidence_name is not None:
+        candidate = Path(evidence_name)
+        if evidence_dir is None:
+            raise ProtectedLaunchError("an evidence name requires an evidence directory")
+        if candidate.name != evidence_name or candidate.suffix != ".json":
+            raise ProtectedLaunchError("the evidence name must be one plain .json file name")
+    if expected_trajectory_sha256 is not None:
+        expected_trajectory_sha256 = expected_trajectory_sha256.strip().lower()
+        if len(expected_trajectory_sha256) != 64 or any(
+            character not in "0123456789abcdef" for character in expected_trajectory_sha256
+        ):
+            raise ProtectedLaunchError(
+                "the expected trajectory reference must be one sha256 hex digest"
+            )
+    if mode == "materialized-mujoco" and expected_trajectory_sha256 is None:
+        raise ProtectedLaunchError(
+            "a materialized attempt requires the independently qualified trajectory digest"
+        )
     tag = platform_tag or reference.platform_tag()
     isolation = build_profile(tag)
     if force_mechanism_unavailable or not mechanism_available():
@@ -394,6 +463,7 @@ def run_protected_probe(
     forbidden_writes: list[Path] = []
     staging = workspace.location(PersistenceClass.STAGING).path
     sealed = workspace.location(PersistenceClass.SEALED_EVIDENCE).path
+    windows_process: Any | None = None
     try:
         for root in forbidden_read_roots:
             sentinels.append(_create_sentinel(root, token, create_root=root in {staging, sealed}))
@@ -464,6 +534,7 @@ def run_protected_probe(
             if os.name == "nt":
                 from tools.res555_gate_b2.windows import AppContainerProcess
 
+                assert isolation.max_processes is not None
                 windows_process = AppContainerProcess.launch(
                     profile=profile,
                     application=runtime.interpreter,
@@ -582,6 +653,8 @@ def run_protected_probe(
             except Exception as error:  # noqa: BLE001
                 post_runtime_error = f"{type(error).__name__}"
 
+            scratch_bytes, scratch_files, scratch_links = _scratch_usage(scratch)
+            scratch_ok = scratch_bytes <= isolation.max_scratch_bytes and scratch_links == 0
             checks: list[dict[str, object]] = [
                 _check("process_exit_zero", exit_code == 0, exit_code, 0),
                 _check("stdin_delivered", stdin_writer.delivered, stdin_writer.delivered, True),
@@ -626,6 +699,7 @@ def run_protected_probe(
                     "canonical",
                 )
             )
+            numerical_reference: dict[str, object] | None = None
             if receipt is not None:
                 receipt_checks = {
                     "receipt_completed": (receipt.completed, True),
@@ -728,6 +802,24 @@ def run_protected_probe(
                             reference.STEPS,
                         )
                     )
+                    observed_trajectory = (
+                        None if receipt.physics is None else receipt.physics.trajectory_sha256
+                    )
+                    assert expected_trajectory_sha256 is not None
+                    trajectory_matches = observed_trajectory == expected_trajectory_sha256
+                    checks.append(
+                        _check(
+                            "receipt_trajectory_reference",
+                            trajectory_matches,
+                            observed_trajectory,
+                            expected_trajectory_sha256,
+                        )
+                    )
+                    numerical_reference = {
+                        "expected_trajectory_sha256": expected_trajectory_sha256,
+                        "observed_trajectory_sha256": observed_trajectory,
+                        "matches": trajectory_matches,
+                    }
                 else:
                     checks.append(
                         _check(
@@ -754,6 +846,19 @@ def run_protected_probe(
                 )
             )
             checks.append(_check("network_denied", canary.accepted == 0, canary.accepted, 0))
+            checks.append(
+                _check(
+                    "scratch_within_limit",
+                    scratch_ok,
+                    {
+                        "bytes": scratch_bytes,
+                        "files": scratch_files,
+                        "links": scratch_links,
+                        "limit_bytes": isolation.max_scratch_bytes,
+                    },
+                    "the post-exit scratch acceptance bound; no kernel aggregate quota",
+                )
+            )
             unexpected_writes = [str(path) for path in forbidden_writes if path.exists()]
             checks.append(
                 _check(
@@ -790,12 +895,14 @@ def run_protected_probe(
             else:
                 ready = external.get("ready")
                 proc = external.get("proc", {})
+                raw_abi = ready.get("abi") if isinstance(ready, dict) else None
+                abi = raw_abi if isinstance(raw_abi, int) else -1
                 checks.append(
                     _check(
                         "external_landlock",
                         isinstance(ready, dict)
                         and ready.get("mechanism") == "linux-landlock"
-                        and int(ready.get("abi", 0)) >= 4
+                        and abi >= 4
                         and proc.get("no_new_privs") == "1"
                         and str(proc.get("cap_eff", "")).lower() == "0000000000000000",
                         {"ready": ready, "proc": proc},
@@ -809,6 +916,16 @@ def run_protected_probe(
                     isinstance(ready, dict) and ready.get("environment_sanitized") is True,
                     ready,
                     "the bootstrap replaced the inherited environment before importing",
+                )
+            )
+            checks.append(
+                _check(
+                    "sandbox_ready_binding",
+                    isinstance(ready, dict)
+                    and ready.get("profile_sha256") == isolation.digest()
+                    and ready.get("runtime_closure_sha256") == runtime.snapshot.digest,
+                    ready,
+                    "the measured profile and runtime closure",
                 )
             )
             checks.append(
@@ -847,6 +964,7 @@ def run_protected_probe(
                 external_isolation=external,
                 receipt_sha256=(sha256_bytes(receipt_bytes) if receipt_bytes is not None else None),
                 receipt=receipt,
+                numerical_reference=numerical_reference,
                 process={
                     "exit_code": exit_code,
                     "pid": int(process.pid),
@@ -858,6 +976,13 @@ def run_protected_probe(
                     "stdout_truncated": stdout_reader.truncated,
                     "stderr_truncated": stderr_reader.truncated,
                     "stderr_excerpt": stderr_bytes[:4096].decode("utf-8", "replace"),
+                    "scratch": {
+                        "bytes": scratch_bytes,
+                        "files": scratch_files,
+                        "links": scratch_links,
+                        "limit_bytes": isolation.max_scratch_bytes,
+                        "within_limit": scratch_ok,
+                    },
                 },
                 response={
                     "valid": response is not None,
@@ -870,8 +995,9 @@ def run_protected_probe(
             )
             observation_path = None
             if evidence_dir is not None:
+                assert evidence_name is not None
                 evidence_dir.mkdir(parents=True, exist_ok=True)
-                observation_path = evidence_dir / f"{tag}.json"
+                observation_path = evidence_dir / evidence_name
                 write_canonical_atomic(observation_path, observation, limit=2 * 1024 * 1024)
             return ProbeLaunchResult(observation=observation, observation_path=observation_path)
         finally:
@@ -881,4 +1007,6 @@ def run_protected_probe(
             sentinel.unlink(missing_ok=True)
         for path in forbidden_writes:
             path.unlink(missing_ok=True)
+        if windows_process is not None:
+            windows_process.close()
         shutil.rmtree(attempt, ignore_errors=True)

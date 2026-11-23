@@ -155,13 +155,15 @@ class IsolationProfile(_Model):
     staging_access: Literal["denied"] = "denied"
     sealed_access: Literal["denied"] = "denied"
     network_access: Literal["denied"] = "denied"
+    network_scope: str
     memory_limit_bytes: int = Field(gt=0)
     cpu_time_seconds: int = Field(gt=0)
     wall_time_seconds: float = Field(gt=0)
     max_stdout_bytes: int = Field(gt=0)
     max_stderr_bytes: int = Field(gt=0)
     max_scratch_bytes: int = Field(gt=0)
-    max_processes: int = Field(gt=0)
+    scratch_limit_enforcement: Literal["post-exit-acceptance-bound"] = "post-exit-acceptance-bound"
+    max_processes: int | None = Field(default=None, gt=0)
 
     model_config = ConfigDict(
         frozen=True,
@@ -449,6 +451,10 @@ def read_bounded_regular(path: Path, *, limit: int) -> bytes:
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
+    except PermissionError:
+        # The sandbox denied the open. Keep the capability error distinguishable from a
+        # shape refusal so an inside-worker probe can report "denied", not "error".
+        raise
     except OSError as error:
         raise ProbePolicyError(
             "a view entry could not be opened without following a link"
@@ -931,6 +937,7 @@ class SupervisorObservation(_Model):
     external_isolation: dict[str, object]
     receipt_sha256: Sha256Hex | None
     receipt: ConsumptionReceipt | None
+    numerical_reference: dict[str, object] | None = None
     process: dict[str, object]
     response: dict[str, object]
     checks: tuple[dict[str, object], ...]
