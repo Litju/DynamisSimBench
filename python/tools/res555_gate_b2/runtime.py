@@ -66,7 +66,12 @@ def _ready(scratch: Path, mechanism: str, abi: int, profile: str, digest: str) -
 def main() -> int:
     config = json.loads((Path.cwd() / "sandbox.json").read_text(encoding="utf-8"))
     scratch = Path(config["scratch"])
-    system_root = os.environ.get("SYSTEMROOT") or os.environ.get("SystemRoot") or "C:/Windows"
+    if os.name == "nt":
+        system_root = os.environ.get("SYSTEMROOT") or os.environ.get("SystemRoot") or "C:/Windows"
+        search_path = str(Path(system_root) / "System32")
+    else:
+        system_root = ""
+        search_path = "/usr/bin:/bin"
     for name in list(os.environ):
         normalised = name.upper()
         if normalised in {
@@ -78,7 +83,7 @@ def main() -> int:
         }:
             continue
         if normalised == "PATH":
-            os.environ[name] = str(Path(system_root) / "System32")
+            os.environ[name] = search_path
             continue
         if normalised in {"TEMP", "TMP", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ"}:
             continue
