@@ -163,6 +163,7 @@ def build_fixture(
     environment: EnvironmentDefinition | None = None,
     study: StudyDefinition | None = None,
     workspace: Workspace | None = None,
+    system_under_test: SUTDefinition | None = None,
 ) -> ExecutionFixture:
     """Build one initialized workspace and one planned control run."""
     if workspace is None:
@@ -175,11 +176,11 @@ def build_fixture(
     chosen_realization = realization or control_realization()
     chosen_environment = environment or control_environment()
     benchmark = domain.benchmark_release()
-    system_under_test = domain.sut_definition()
+    chosen_sut = system_under_test or domain.sut_definition()
     world = PlanningContext(
         benchmarks=(benchmark,),
         realizations=(chosen_realization,),
-        systems_under_test=(system_under_test,),
+        systems_under_test=(chosen_sut,),
         environments=(chosen_environment,),
     )
     chosen_study = study or control_study()
@@ -191,7 +192,7 @@ def build_fixture(
         realization=chosen_realization,
         environment=chosen_environment,
         benchmark=benchmark,
-        system_under_test=system_under_test,
+        system_under_test=chosen_sut,
         study=chosen_study,
     )
 
