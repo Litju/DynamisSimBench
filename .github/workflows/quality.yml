@@ -229,6 +229,25 @@ jobs:
             --image-os "${ImageOS:-unknown}" \
             --image-version "${ImageVersion:-unknown}" \
             --output "evidence/mujoco-qualification-${{ matrix.name }}.json"
+      # RES-555 Gate B2 evidence, not one of the eight ADR-025 gates. It runs the probe-only
+      # harness under the platform mechanism and retains the supervisor observation. The
+      # tests fail closed if the mechanism is unavailable; there is no unprotected fallback.
+      - name: Run the RES-555 Gate B2 protected-consumption probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --frozen pytest -q \
+            tests/execution/mujoco/test_b2_protected_consumption.py \
+            tests/execution/mujoco/test_b2_protected_verify_only.py
+        env:
+          DYNAMISBENCH_RES555_B2_PROBE: "1"
+          DYNAMISBENCH_RES555_B2_EVIDENCE_DIR: "evidence/res555-gate-b2"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: res555-gate-b2-${{ matrix.name }}
+          path: python/evidence/res555-gate-b2/
+          if-no-files-found: error
+          retention-days: 90
       - name: Generate the M1 qualification report
         run: >
           uv run python tools/m1_qualification.py
@@ -290,6 +309,47 @@ jobs:
         with:
           name: mujoco-receipt-comparison
           path: python/evidence/mujoco-receipt-comparison.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # Additional RES-555 Gate B2 acceptance evidence, deliberately outside the eight ADR-025
+  # gates. It compares the two probe observations at the exact tested commits and requires
+  # the same materialized model identity and the same qualified trajectory.
+  res555-gate-b2-comparison:
+    name: res555-gate-b2-comparison
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: python
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --frozen
+      - uses: actions/download-artifact@v4
+        with:
+          name: res555-gate-b2-windows-x64
+          path: python/evidence/b2/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: res555-gate-b2-linux-x64
+          path: python/evidence/b2/linux
+      - name: Compare the Windows and Linux Gate B2 probe observations
+        run: >
+          uv run --frozen python -m tools.res555_gate_b2.compare
+          --windows evidence/b2/windows/windows-x86-64.json
+          --linux evidence/b2/linux/linux-x86-64.json
+          --output evidence/res555-gate-b2-comparison.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: res555-gate-b2-comparison
+          path: python/evidence/res555-gate-b2-comparison.json
           if-no-files-found: error
           retention-days: 90
 
