@@ -62,16 +62,16 @@ identity pipeline it could also reach it through a convenience method that looke
 which is precisely the accident this rule prevents.
 """
 
-READING_MODULES = ("discovery.py", "source_authority.py")
+EXTERNAL_RESULTS_MODULE = "external_results.py"
+READING_MODULES = ("discovery.py", EXTERNAL_RESULTS_MODULE, "source_authority.py")
 """Reading what a workspace holds, deliberately after the location boundary.
 
 RES-377 adds two modules that read authority rather than locate it: the category/kind
 contract plus the strict authoring loader, and the read-only discovery walk. They need the
 domain's kind registry, the validated models, the identity pipeline, and PyYAML, so the
 location rules above do not apply to them. The rule that still does is the reason the two
-groups are named separately: the hash these modules take is over a validated model, never
-over a path. ``test_a_validated_model_hashes_the_same_wherever_its_workspace_is`` is the
-gate that makes that structural rather than aspirational.
+groups are named separately. The authoring reader hashes validated meaning. The external
+result reader hashes the exact CSV bytes so that a discovered source can be rechecked.
 """
 
 WORKSPACE_MODULES = LOCATION_MODULES + READING_MODULES
@@ -133,6 +133,8 @@ YAML authoring, and ``dynamisbench`` for the domain and identity pipelines. An
 allow-list rather than a deny-list, so a future import is a decision this file has to
 record — which is the same shape of rule the location layer has always had.
 """
+
+EXTERNAL_RESULT_IMPORT_ROOTS = ALLOWED_IMPORT_ROOTS | {"io", "math", "stat"}
 
 
 def imported_roots(path: Path) -> set[str]:
@@ -313,7 +315,10 @@ def test_the_reader_modules_import_only_the_reading_stack(filename: str) -> None
     allow-list rather than a deny-list, so a future import is a decision this file has to
     record.
     """
-    unexpected = imported_roots(PACKAGE_ROOT / "workspace" / filename) - READER_IMPORT_ROOTS
+    allowed = (
+        EXTERNAL_RESULT_IMPORT_ROOTS if filename == EXTERNAL_RESULTS_MODULE else READER_IMPORT_ROOTS
+    )
+    unexpected = imported_roots(PACKAGE_ROOT / "workspace" / filename) - allowed
     assert not unexpected, f"{filename} imports {sorted(unexpected)}"
 
 
