@@ -127,6 +127,26 @@ def test_a_closure_refuses_a_hardlink(tmp_path: Path) -> None:
         measure_root_closure("test", root)
 
 
+def test_a_closure_resolves_an_in_root_file_link_only_when_allowed(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    real = root / "real.so"
+    real.write_bytes(b"shared-library-bytes")
+    link = root / "libname.so"
+    try:
+        link.symlink_to(real)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("host symlink privilege is unavailable")
+        raise
+    with pytest.raises(ProbePolicyError):
+        measure_root_closure("base", root)
+    closure = measure_root_closure("base", root, allow_symlinks=True)
+    entries = {entry.path: entry for entry in closure.entries}
+    assert entries["libname.so"].sha256 == entries["real.so"].sha256
+    assert entries["libname.so"].size_bytes == len(b"shared-library-bytes")
+
+
 def test_no_production_module_imports_the_probe_harness() -> None:
     root = Path(__file__).resolve().parents[2] / "src" / "dynamisbench"
     forbidden = ("_b2_probe", "res555_gate_b2", "_b2_landlock")
