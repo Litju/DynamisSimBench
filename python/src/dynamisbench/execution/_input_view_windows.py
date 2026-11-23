@@ -240,7 +240,6 @@ def open_root(path: Path) -> int:
                 MaterializationRefusalCode.INPUT_PATH_REFUSED,
                 "the input view root requires its exact NTFS path",
             )
-        _check_streams(handle, directory=True)
         return handle
     except BaseException:
         close(handle)
@@ -285,6 +284,7 @@ def open_child(parent: int, name: str, *, directory: bool, inode: int) -> int:
 
 
 def entries(directory: int) -> Iterator[tuple[str, int]]:
+    _check_streams(directory, directory=True)
     buffer = ctypes.create_string_buffer(4096)
     kind = _FILE_ID_BOTH_DIRECTORY_RESTART_INFO
     while _query(directory, kind, buffer, ctypes.sizeof(buffer)):

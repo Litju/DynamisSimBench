@@ -311,12 +311,13 @@ def test_offline_view_survives_relocation_and_source_cache_deletion(
     _assert_no_run(model_fixture)
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="NTFS root alias fixture")
 @pytest.mark.parametrize("alias", ["case", "ancestor-case", "short"])
 def test_offline_view_refuses_ntfs_root_alias(
     candidate_view: tuple[Path, PreparedExecutionInputs, WorkerInputBinding],
     alias: str,
 ) -> None:
+    if sys.platform != "win32":
+        pytest.skip("NTFS root alias fixture")
     root, prepared, binding = candidate_view
     assert prepared.request is not None
     verify_worker_input_view(root, expected=binding, request=prepared.request)
@@ -484,6 +485,30 @@ def test_offline_view_refuses_new_hardlink_at_final_checkpoint(
     with pytest.raises(MaterializationError, match="link or non-regular object"):
         verify_worker_input_view(root, expected=binding, request=prepared.request)
     assert alias.samefile(model)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS root stream fixture")
+def test_offline_view_refuses_new_root_stream_at_final_checkpoint(
+    candidate_view: tuple[Path, PreparedExecutionInputs, WorkerInputBinding],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, prepared, binding = candidate_view
+    assert prepared.request is not None
+    stream = Path(f"{root}:late")
+    reader = _platform_reader()
+    read_original = reader.read
+
+    def add_stream_after_model_read(handle: int, limit: int) -> bytes:
+        data = read_original(handle, limit)
+        if data == MODEL_BYTES:
+            stream.write_bytes(b"unexpected")
+            assert stream.read_bytes() == b"unexpected"
+        return data
+
+    monkeypatch.setattr(reader, "read", add_stream_after_model_read)
+    with pytest.raises(MaterializationError, match="alternate data stream"):
+        verify_worker_input_view(root, expected=binding, request=prepared.request)
+    assert stream.read_bytes() == b"unexpected"
 
 
 def test_offline_view_refuses_manifest_rehashed_with_substitute_asset(
