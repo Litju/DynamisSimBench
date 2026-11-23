@@ -213,6 +213,41 @@ def test_a_tampered_input_view_refuses_before_launch(
     }
 
 
+def test_a_late_hardlink_in_the_runtime_refuses_before_physics(
+    mujoco_fixture: ExecutionFixture,
+    mujoco_identity: dict,
+    b2_runtime,
+) -> None:
+    profile, runtime = b2_runtime
+    target = runtime.site_packages / "mujoco" / "__init__.py"
+    alias = runtime.site_packages / "res555-late-hardlink.py"
+
+    def tamper(_runtime: ProtectedRuntime) -> None:
+        os.link(target, alias)
+
+    try:
+        result = _run(
+            mujoco_fixture,
+            runtime,
+            profile,
+            identity=mujoco_identity,
+            tamper=tamper,
+        )
+    finally:
+        alias.unlink(missing_ok=True)
+
+    observation = result.observation
+    assert observation.verdict == "refused"
+    assert observation.receipt is not None
+    assert observation.receipt.completed is False
+    assert observation.receipt.physics is None
+    assert observation.receipt.model is None
+    assert "runtime_unchanged" in observation.refusals
+    assert any(
+        check["name"] == "receipt_probes" and not check["passed"] for check in observation.checks
+    )
+
+
 def test_a_replayed_binding_is_refused(
     mujoco_fixture: ExecutionFixture,
     mujoco_identity: dict,

@@ -6,6 +6,7 @@ binding readability the worker depends on, the profile identity and the fail-clo
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -110,6 +111,18 @@ def test_a_closure_refuses_a_link(tmp_path: Path) -> None:
         if getattr(error, "winerror", None) == 1314:
             pytest.skip("host symlink privilege is unavailable")
         raise
+    with pytest.raises(ProbePolicyError):
+        measure_root_closure("test", root)
+
+
+def test_a_closure_refuses_a_hardlink(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    original = root / "file.txt"
+    original.write_text("content", encoding="utf-8")
+    alias = root / "alias.txt"
+    os.link(original, alias)
+    assert alias.stat().st_nlink == 2
     with pytest.raises(ProbePolicyError):
         measure_root_closure("test", root)
 
