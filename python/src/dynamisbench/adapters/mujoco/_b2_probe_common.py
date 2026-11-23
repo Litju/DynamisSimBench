@@ -228,6 +228,7 @@ def measure_root_closure(
     exclude_relative_prefixes: Sequence[str] = (),
     exclude_names: Iterable[str] = _CLOSURE_EXCLUDED_NAMES,
     allow_hardlinks: bool = False,
+    allow_symlinks: bool = False,
 ) -> RootClosure:
     """Measure one root as portable relative paths, refusing links and special files.
 
@@ -237,14 +238,18 @@ def measure_root_closure(
     is a claim about exact bytes, and an alias is not one.
 
     ``allow_hardlinks`` exists only for measuring the *installed* source tree, where a
-    package installer may deduplicate files with hard links. The executed snapshot is
-    copied and is always measured with hard links refused; the source/snapshot comparison
-    uses :attr:`RootClosure.content_digest`, which excludes the hard-link policy.
+    package installer may deduplicate files with hard links. ``allow_symlinks`` exists only
+    for the installed base runtime, where a distribution uses an in-tree library symlink
+    (for example ``libpython3.12.so``); the link is resolved, required to remain inside
+    the same root, and hashed as the target's bytes. The executed snapshot is copied and
+    is always measured with both allowances off; the source/snapshot comparison uses
+    :attr:`RootClosure.content_digest`, which excludes the link policy.
     """
     if not root.is_absolute() or not root.is_dir():
         raise ProbePolicyError(f"closure root {label!r} is not an absolute directory")
     if is_link_or_reparse_point(root):
         raise ProbePolicyError(f"closure root {label!r} is a link or reparse point")
+    resolved_root = root.resolve()
     excluded_prefixes = tuple(prefix.strip("/") for prefix in exclude_relative_prefixes)
     excluded_names = frozenset(exclude_names)
     entries: list[ClosureEntry] = []
@@ -265,9 +270,22 @@ def measure_root_closure(
                 continue
             info = child.lstat()
             if is_link_or_reparse_point(child):
-                raise ProbePolicyError(
-                    f"closure {label!r} contains a link or reparse point at {child_relative!r}"
-                )
+                if not allow_symlinks:
+                    raise ProbePolicyError(
+                        f"closure {label!r} contains a link or reparse point at {child_relative!r}"
+                    )
+                resolved = child.resolve()
+                if not resolved.exists() or not resolved.is_relative_to(resolved_root):
+                    raise ProbePolicyError(
+                        f"closure {label!r} contains a link outside its root at {child_relative!r}"
+                    )
+                if not resolved.is_file():
+                    raise ProbePolicyError(
+                        f"closure {label!r} contains a non-file link at {child_relative!r}"
+                    )
+                size, digest = sha256_file(resolved, allow_hardlinks=allow_hardlinks)
+                entries.append(ClosureEntry(path=child_relative, size_bytes=size, sha256=digest))
+                continue
             if stat.S_ISDIR(info.st_mode):
                 visit(child, child_relative)
             elif stat.S_ISREG(info.st_mode):
@@ -288,11 +306,13 @@ def measure_root_closure(
 
     visit(root, "")
     ordered = tuple(sorted(entries, key=lambda entry: entry.path))
-    policy = _CLOSURE_POLICY + (
-        "; hard links are followed by path in the installed-source measurement"
-        if allow_hardlinks
-        else "; every measured object is a single-link file"
-    )
+    policy = _CLOSURE_POLICY
+    if allow_hardlinks:
+        policy += "; hard links are followed by path in the installed-source measurement"
+    else:
+        policy += "; every measured object is a single-link file"
+    if allow_symlinks:
+        policy += "; in-root file symlinks are resolved and hashed as their target bytes"
     payload = {
         "schema": CLOSURE_SCHEMA,
         "label": label,
@@ -366,6 +386,7 @@ def measure_runtime_identity(
     source_root: Path,
     model_asset_relative: str | None = None,
     allow_hardlinks: bool = False,
+    allow_symlinks: bool = False,
 ) -> RuntimeIdentity:
     """Measure the interpreter, base installation, site-packages and adapter source.
 
@@ -373,7 +394,9 @@ def measure_runtime_identity(
     given, it is excluded from the source closure because the materialized route removes it
     from the sandbox: its bytes must arrive through the verified input view instead. The
     same exclusion is applied on the trusted source side, so the comparison is about the
-    bytes that actually execute.
+    bytes that actually execute. The installed base always permits in-root file symlinks
+    (a distribution library alias); the source site-packages/source tree permits them only
+    when ``allow_symlinks`` is set. The copied snapshot and the worker are strict.
     """
     resolved_executable = executable.resolve()
     executable_size, executable_digest = sha256_file(resolved_executable, allow_hardlinks=True)
@@ -387,13 +410,20 @@ def measure_runtime_identity(
         base_prefix,
         exclude_relative_prefixes=base_exclusions,
         allow_hardlinks=True,
+        allow_symlinks=True,
     )
-    site = measure_root_closure("site-packages", site_packages, allow_hardlinks=allow_hardlinks)
+    site = measure_root_closure(
+        "site-packages",
+        site_packages,
+        allow_hardlinks=allow_hardlinks,
+        allow_symlinks=allow_symlinks,
+    )
     source = measure_root_closure(
         "source",
         source_root,
         exclude_relative_prefixes=exclude,
         allow_hardlinks=allow_hardlinks,
+        allow_symlinks=allow_symlinks,
     )
     provisional = RuntimeIdentity(
         executable=str(resolved_executable),

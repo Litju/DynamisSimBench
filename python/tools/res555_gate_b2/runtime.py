@@ -415,6 +415,7 @@ def prepare_runtime(
             source_root=environment.source_root,
             model_asset_relative=_MODEL_ASSET,
             allow_hardlinks=True,
+            allow_symlinks=True,
         )
         snapshot_identity = measure_runtime_identity(
             executable=launch_interpreter,
@@ -445,6 +446,7 @@ def prepare_runtime(
             source_root=environment.source_root,
             model_asset_relative=_MODEL_ASSET,
             allow_hardlinks=True,
+            allow_symlinks=True,
         )
         snapshot_identity = measure_runtime_identity(
             executable=resolved_interpreter,
