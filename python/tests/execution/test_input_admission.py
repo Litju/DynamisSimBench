@@ -459,6 +459,33 @@ def test_offline_view_refuses_same_bytes_swapped_after_enumeration(
     assert replaced
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux permits links to open input files")
+def test_offline_view_refuses_new_hardlink_at_final_checkpoint(
+    candidate_view: tuple[Path, PreparedExecutionInputs, WorkerInputBinding],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, prepared, binding = candidate_view
+    assert prepared.request is not None
+    model = root / "assets" / MODEL_PATH
+    alias = root.parent / "unexpected-hardlink"
+    reader = _platform_reader()
+    read_original = reader.read
+
+    def link_after_model_read(handle: int, limit: int) -> bytes:
+        data = read_original(handle, limit)
+        if data == MODEL_BYTES:
+            alias.hardlink_to(model)
+            assert model.stat().st_nlink == 2
+        return data
+
+    # The extra link is outside the view, so the directory entries and inode
+    # numbers visible inside the view still match at the final checkpoint.
+    monkeypatch.setattr(reader, "read", link_after_model_read)
+    with pytest.raises(MaterializationError, match="link or non-regular object"):
+        verify_worker_input_view(root, expected=binding, request=prepared.request)
+    assert alias.samefile(model)
+
+
 def test_offline_view_refuses_manifest_rehashed_with_substitute_asset(
     candidate_view: tuple[Path, PreparedExecutionInputs, WorkerInputBinding],
 ) -> None:
