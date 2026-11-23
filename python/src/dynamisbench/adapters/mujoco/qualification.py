@@ -128,6 +128,38 @@ def _nonfinite_check() -> dict[str, Any]:
     }
 
 
+def _materialized_parity() -> dict[str, Any]:
+    """Prove the materialized compiler and the packaged path produce one physics run."""
+    physics.load_model()
+    identity = build_implementation_identity(
+        engine_version=physics.engine_version(),
+        python_version=(
+            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        ),
+        platform_tag=reference.platform_tag(),
+    )
+    context = _context(identity.digest)
+    packaged = physics.run_reference(context)
+    original = physics.load_model
+
+    def from_materialized_bytes():
+        return physics.compile_model(reference.model_bytes())
+
+    try:
+        physics.load_model = from_materialized_bytes
+        materialized = physics.run_reference(context)
+    finally:
+        physics.load_model = original
+    return {
+        "schema": "dynamisbench.mujoco.materialized-parity/1",
+        "diagnostics_equal": materialized.diagnostic == packaged.diagnostic,
+        "samples_equal": materialized.samples == packaged.samples,
+        "trajectory_sha256": materialized.diagnostic.trajectory_sha256,
+        "packaged_trajectory_sha256": packaged.diagnostic.trajectory_sha256,
+        "implementation_digest": identity.digest,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run exactly one qualification mode, or refuse an unknown argument vector."""
     arguments = sys.argv[1:] if argv is None else argv
@@ -135,9 +167,12 @@ def main(argv: list[str] | None = None) -> int:
         payload = _qualification()
     elif arguments == ["--nonfinite-check"]:
         payload = _nonfinite_check()
+    elif arguments == ["--materialized-parity"]:
+        payload = _materialized_parity()
     else:
         sys.stderr.write(
-            "dynamisbench mujoco qualification: no arguments or --nonfinite-check only\n"
+            "dynamisbench mujoco qualification: no arguments, --nonfinite-check or "
+            "--materialized-parity only\n"
         )
         return 2
     sys.stdout.buffer.write(canonical_semantic_bytes(payload) + b"\n")
