@@ -29,8 +29,13 @@ Native extraction, sealing and a production materialized-worker route remain una
    writes a bounded consumption receipt.
 6. The supervisor correlates the receipt with its fresh nonce, binding, request, manifest,
    runtime and profile, re-verifies the input view and runtime after exit, checks the
-   localhost canary, and writes a supervisor observation to
+   localhost canary, compares the receipt trajectory with the separately qualified
+   `mujoco_qualification` reference digest, and writes a supervisor observation to
    `evidence/res555-gate-b2/<platform>.json`.
+
+Only the positive materialized test names an evidence file. Every negative and verify-only
+test passes no evidence name, so it cannot overwrite the acceptance observation; the positive
+test reads its own file back and requires a demonstrated materialized observation.
 
 The simulator-free JSON fixture runs the same bootstrap in `verify-only` mode and proves that
 the launch, closure, view and denial mechanisms are engine-independent. It is not a second
@@ -54,8 +59,19 @@ CI sets it and treats an unavailable mechanism as a failure. There is no A1 fall
 ## What is not claimed
 
 - No production launch, no native capture, no canonicalization, no assessment, no seal.
-- No aggregate kernel-enforced scratch quota (Windows uses Job memory limits and post-exit
-  checks; Linux uses `RLIMIT_FSIZE`/`RLIMIT_AS` and post-exit checks).
+- No aggregate kernel-enforced scratch quota. The scratch bound is a **post-exit acceptance
+  bound** (`scratch_limit_enforcement: post-exit-acceptance-bound`): Windows also applies Job
+  memory limits and Linux applies `RLIMIT_FSIZE`/`RLIMIT_AS`, but a run that exceeds the bound
+  is refused only after it exits; it is not prevented from writing within its filesystem
+  allowance.
+- No universal process-count bound. Windows sets a Job Object active-process limit of 8. Linux
+  records `max_processes: null`: no equivalent cgroup or rlimit bound is enforced, and a
+  process that calls `setsid()` leaves the supervisor's process group. This is a named
+  production gap, not a claim.
+- Network denial scope differs. Windows has no AppContainer network capability, so outbound
+  TCP/UDP from the worker is denied. Linux Landlock denies TCP bind/connect only; UDP, raw and
+  Unix-domain sockets are not restricted by this profile. The supervisor canary is TCP and
+  therefore does not measure the unhandled families.
 - No vendor-authenticated wheels or interpreter binary. The closure is a measured snapshot,
   not a signature.
 - On an elevated CI runner the AppContainer token can report `elevated=true`; the probe records that fact but does not treat it as isolation. The package-SID/restricted-token file access, the explicit DACLs and the in-worker denial probes are the evidence. A non-elevated local run records `elevated=false` and the same denials.
@@ -64,5 +80,9 @@ CI sets it and treats an unavailable mechanism as a failure. There is no A1 fall
   qualified host. `-I` ignores Python environment overrides and the AppContainer denies the
   inherited paths; the production contract still needs a rebuilt environment and must be
   re-qualified if that differs.
+- The `sandbox-ready.json` payload is written by the worker-side bootstrap. It is a
+  synchronization and configuration echo, not independent proof: the supervisor checks it
+  against its own profile/runtime digests, but the isolation claim rests on the external
+  AppContainer token or `/proc` facts and the in-worker denial probes.
 - The probe does not authorize any decision in the authority packet. It provides evidence
   for the owner's review.

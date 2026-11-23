@@ -7,7 +7,6 @@ worker never imports the engine. It is not a second solver adapter.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from tools.res555_gate_b2.launch import run_protected_probe
@@ -71,17 +70,15 @@ def test_the_protected_bootstrap_verifies_inputs_without_importing_the_engine(
             fixture.workspace.location(PersistenceClass.STAGING).path,
             fixture.workspace.location(PersistenceClass.SEALED_EVIDENCE).path,
             runtime.environment.source_root,
-        ),
-        evidence_dir=(
-            Path(os.environ["DYNAMISBENCH_RES555_B2_EVIDENCE_DIR"])
-            if os.environ.get("DYNAMISBENCH_RES555_B2_EVIDENCE_DIR")
-            else None
+            runtime.registry_root,
         ),
     )
     observation = result.observation
-    assert observation.verdict == "demonstrated", [
-        check for check in observation.checks if not check["passed"]
-    ]
+    assert observation.verdict == "demonstrated", (
+        [check for check in observation.checks if not check["passed"]],
+        observation.process.get("stderr_excerpt"),
+        None if observation.receipt is None else observation.receipt.failure,
+    )
     receipt = observation.receipt
     assert receipt is not None
     assert receipt.completed is True
@@ -89,6 +86,7 @@ def test_the_protected_bootstrap_verifies_inputs_without_importing_the_engine(
     assert receipt.engine_imported is False
     assert receipt.model is None
     assert receipt.physics is None
+    assert observation.numerical_reference is None
     assert receipt.input_manifest_sha256 == prepared.inputs.manifest_digest.hex
     probes = {probe.name: probe for probe in receipt.probes}
     assert probes["allowed_input_read"].observed == "allowed"

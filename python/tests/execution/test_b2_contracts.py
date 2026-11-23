@@ -7,15 +7,24 @@ binding readability the worker depends on, the profile identity and the fail-clo
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
+from tools.res555_gate_b2.launch import (
+    ProtectedLaunchError,
+    _scratch_usage,
+    run_protected_probe,
+)
 from tools.res555_gate_b2.profile import build_profile
 
 from dynamisbench.adapters.mujoco._b2_probe_common import (
     ProbePolicyError,
     assert_probe_authorized,
     measure_root_closure,
+    read_bounded_regular,
 )
 from dynamisbench.domain.spec.sut import SUTInterface, SUTInterfaceKind
 from dynamisbench.execution.input_binding import WorkerInputBinding
@@ -98,6 +107,77 @@ def test_the_isolation_profile_is_platform_explicit() -> None:
     assert windows.scratch_access == "read-write"
     assert windows.scientific_source_access == "denied"
     assert windows.network_access == "denied"
+    assert windows.max_processes == 8
+    assert linux.max_processes is None
+    assert "UDP" in linux.network_scope
+    assert windows.scratch_limit_enforcement == "post-exit-acceptance-bound"
+
+
+def test_the_scratch_usage_measurement_counts_exact_bytes(tmp_path: Path) -> None:
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    (scratch / "receipt.json").write_bytes(b"12345")
+    (scratch / "logs").mkdir()
+    (scratch / "logs" / "worker.txt").write_bytes(b"abc")
+    assert _scratch_usage(scratch) == (8, 2, 0)
+
+
+def test_a_materialized_probe_requires_a_qualified_trajectory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DYNAMISBENCH_RES555_B2_PROBE", "1")
+    missing = cast(Any, None)
+    with pytest.raises(ProtectedLaunchError, match="qualified trajectory"):
+        run_protected_probe(
+            workspace=missing,
+            prepared=missing,
+            selection=missing,
+            runtime=missing,
+            mode="materialized-mujoco",
+        )
+    with pytest.raises(ProtectedLaunchError, match="sha256"):
+        run_protected_probe(
+            workspace=missing,
+            prepared=missing,
+            selection=missing,
+            runtime=missing,
+            mode="materialized-mujoco",
+            expected_trajectory_sha256="not-a-digest",
+        )
+
+
+def test_an_evidence_name_cannot_escape_the_evidence_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DYNAMISBENCH_RES555_B2_PROBE", "1")
+    missing = cast(Any, None)
+    with pytest.raises(ProtectedLaunchError, match="plain .json"):
+        run_protected_probe(
+            workspace=missing,
+            prepared=missing,
+            selection=missing,
+            runtime=missing,
+            mode="materialized-mujoco",
+            expected_trajectory_sha256="0" * 64,
+            evidence_dir=tmp_path,
+            evidence_name="../escape.json",
+        )
+
+
+def test_a_denied_read_is_a_permission_error_not_a_shape_refusal(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode-bit denial fixture")
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root can read a mode-000 file")
+    path = tmp_path / "sentinel.txt"
+    path.write_bytes(b"RES555\n")
+    path.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            read_bounded_regular(path, limit=4096)
+    finally:
+        path.chmod(0o600)
 
 
 def test_a_closure_refuses_a_link(tmp_path: Path) -> None:
@@ -147,20 +227,36 @@ def test_a_closure_resolves_an_in_root_file_link_only_when_allowed(tmp_path: Pat
     assert entries["libname.so"].size_bytes == len(b"shared-library-bytes")
 
 
+def test_a_closure_refuses_a_junction(tmp_path: Path) -> None:
+    if sys.platform != "win32":
+        pytest.skip("NTFS junction fixture")
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (outside / "file.txt").write_text("content", encoding="utf-8")
+    junction = root / "junction"
+    subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/j", str(junction), str(outside)],
+        check=True,
+        capture_output=True,
+    )
+    assert junction.is_junction()
+    with pytest.raises(ProbePolicyError):
+        measure_root_closure("test", root)
+
+
 def test_no_production_module_imports_the_probe_harness() -> None:
     root = Path(__file__).resolve().parents[2] / "src" / "dynamisbench"
     forbidden = ("_b2_probe", "res555_gate_b2", "_b2_landlock")
-    scanned = [
-        root / "execution" / "supervisor.py",
-        root / "execution" / "preflight.py",
-        root / "execution" / "contracts.py",
-        root / "execution" / "environment.py",
-        root / "cli.py",
-        root / "api",
-    ]
-    for candidate in scanned:
-        paths = [candidate] if candidate.is_file() else sorted(candidate.rglob("*.py"))
-        for path in paths:
-            text = path.read_text(encoding="utf-8")
-            for token in forbidden:
-                assert token not in text, f"{path} references the probe-only {token}"
+    probe_only = {
+        "adapters/mujoco/_b2_probe_common.py",
+        "adapters/mujoco/_b2_probe_worker.py",
+        "execution/_b2_landlock.py",
+    }
+    for path in sorted(root.rglob("*.py")):
+        if path.relative_to(root).as_posix() in probe_only:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            assert token not in text, f"{path} references the probe-only {token}"

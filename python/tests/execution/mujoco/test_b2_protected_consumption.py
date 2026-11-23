@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import cast
 
 import pytest
 from tools.res555_gate_b2.launch import (
@@ -21,6 +22,7 @@ from tools.res555_gate_b2.profile import build_profile
 from tools.res555_gate_b2.runtime import ProtectedRuntime
 
 from dynamisbench.adapters.mujoco import reference
+from dynamisbench.adapters.mujoco._b2_probe_common import SupervisorObservation
 from dynamisbench.execution import prepare_execution_inputs
 from dynamisbench.execution.input_binding import build_worker_input_binding
 from dynamisbench.workspace import PersistenceClass
@@ -57,6 +59,7 @@ def _forbidden_roots(fixture: ExecutionFixture, runtime: ProtectedRuntime) -> tu
         fixture.workspace.location(PersistenceClass.STAGING).path,
         fixture.workspace.location(PersistenceClass.SEALED_EVIDENCE).path,
         runtime.environment.source_root,
+        runtime.registry_root,
     )
 
 
@@ -76,9 +79,13 @@ def _run(
         mode=mode,
         profile=profile,
         forbidden_read_roots=_forbidden_roots(fixture, runtime),
-        evidence_dir=_evidence_dir(),
         **kwargs,
     )
+
+
+def _failure_context(observation: SupervisorObservation) -> tuple[object, object]:
+    failure = None if observation.receipt is None else observation.receipt.failure
+    return observation.process.get("stderr_excerpt"), failure
 
 
 def test_the_real_pinned_worker_consumes_the_verified_materialized_model(
@@ -86,14 +93,26 @@ def test_the_real_pinned_worker_consumes_the_verified_materialized_model(
     mujoco_identity: dict,
     mujoco_qualification: dict,
     b2_runtime,
+    tmp_path: Path,
 ) -> None:
     profile, runtime = b2_runtime
-    result = _run(mujoco_fixture, runtime, profile, identity=mujoco_identity)
+    diagnostic = mujoco_qualification["nominal"]["diagnostic"]
+    evidence_dir = _evidence_dir() or (tmp_path / "evidence")
+    result = _run(
+        mujoco_fixture,
+        runtime,
+        profile,
+        identity=mujoco_identity,
+        expected_trajectory_sha256=diagnostic["trajectory_sha256"],
+        evidence_dir=evidence_dir,
+        evidence_name=f"{reference.platform_tag()}.json",
+    )
     observation = result.observation
 
-    assert observation.verdict == "demonstrated", [
-        check for check in observation.checks if not check["passed"]
-    ]
+    assert observation.verdict == "demonstrated", (
+        [check for check in observation.checks if not check["passed"]],
+        *_failure_context(observation),
+    )
     assert observation.refusals == ()
     assert observation.runtime_matches is True
     assert observation.source_runtime.digest == observation.snapshot_runtime.digest
@@ -115,8 +134,13 @@ def test_the_real_pinned_worker_consumes_the_verified_materialized_model(
     assert receipt.physics.final_time_s == pytest.approx(reference.DURATION_S, abs=1e-9)
 
     # The existing independent qualification observation is the scientific reference.
-    diagnostic = mujoco_qualification["nominal"]["diagnostic"]
     assert receipt.physics.trajectory_sha256 == diagnostic["trajectory_sha256"]
+    assert observation.numerical_reference is not None
+    assert observation.numerical_reference["matches"] is True
+    assert (
+        observation.numerical_reference["expected_trajectory_sha256"]
+        == (diagnostic["trajectory_sha256"])
+    )
     assert receipt.physics.initial_time_s == diagnostic["initial"]["time_s"]
     assert receipt.physics.final_angle_rad == diagnostic["final"]["angle_rad"]
     assert (
@@ -146,15 +170,51 @@ def test_the_real_pinned_worker_consumes_the_verified_materialized_model(
     source_model = mujoco_fixture.workspace.source_root / reference.MODEL_SOURCE_PATH
     assert source_model.read_bytes() == reference.model_bytes()
     assert receipt.model.sha256 == reference.MODEL_SHA256
+    scratch_observation = cast("dict[str, object]", observation.process["scratch"])
+    assert scratch_observation["within_limit"] is True
 
-    if result.observation_path is not None:
-        assert result.observation_path.is_file()
-        assert result.observation_path.stat().st_size > 0
+    # The published evidence file must be this demonstrated materialized observation.
+    assert result.observation_path is not None
+    assert result.observation_path.is_file()
+    assert result.observation_path.stat().st_size > 0
+    persisted = SupervisorObservation.model_validate_json(result.observation_path.read_bytes())
+    assert persisted.verdict == "demonstrated"
+    assert persisted.receipt is not None
+    assert persisted.receipt.mode == "materialized-mujoco"
+    assert persisted.receipt.model is not None
+    assert persisted.receipt.physics is not None
+    assert persisted.numerical_reference is not None
+    assert persisted.numerical_reference["matches"] is True
+
+
+def test_a_mismatched_trajectory_is_refused(
+    mujoco_fixture: ExecutionFixture,
+    mujoco_identity: dict,
+    b2_runtime,
+) -> None:
+    """A completed worker with the wrong physics trajectory is not accepted."""
+    profile, runtime = b2_runtime
+    result = _run(
+        mujoco_fixture,
+        runtime,
+        profile,
+        identity=mujoco_identity,
+        expected_trajectory_sha256="0" * 64,
+    )
+    observation = result.observation
+    assert observation.verdict == "refused", _failure_context(observation)
+    assert "receipt_trajectory_reference" in observation.refusals
+    assert observation.receipt is not None
+    assert observation.receipt.physics is not None
+    assert observation.receipt.model is not None
+    assert observation.numerical_reference is not None
+    assert observation.numerical_reference["matches"] is False
 
 
 def test_a_substituted_runtime_refuses_before_physics(
     mujoco_fixture: ExecutionFixture,
     mujoco_identity: dict,
+    mujoco_qualification: dict,
     b2_runtime,
 ) -> None:
     profile, runtime = b2_runtime
@@ -170,13 +230,16 @@ def test_a_substituted_runtime_refuses_before_physics(
             runtime,
             profile,
             identity=mujoco_identity,
+            expected_trajectory_sha256=mujoco_qualification["nominal"]["diagnostic"][
+                "trajectory_sha256"
+            ],
             tamper=tamper,
         )
     finally:
         target.write_bytes(original)
 
     observation = result.observation
-    assert observation.verdict == "refused"
+    assert observation.verdict == "refused", _failure_context(observation)
     assert observation.receipt is not None
     assert observation.receipt.completed is False
     assert observation.receipt.physics is None
@@ -190,6 +253,7 @@ def test_a_substituted_runtime_refuses_before_physics(
 def test_a_tampered_input_view_refuses_before_launch(
     mujoco_fixture: ExecutionFixture,
     mujoco_identity: dict,
+    mujoco_qualification: dict,
     b2_runtime,
 ) -> None:
     profile, runtime = b2_runtime
@@ -204,6 +268,9 @@ def test_a_tampered_input_view_refuses_before_launch(
             runtime,
             profile,
             identity=mujoco_identity,
+            expected_trajectory_sha256=mujoco_qualification["nominal"]["diagnostic"][
+                "trajectory_sha256"
+            ],
             view_tamper=tamper,
         )
     assert type(raised.value).__name__ in {
@@ -216,6 +283,7 @@ def test_a_tampered_input_view_refuses_before_launch(
 def test_a_late_hardlink_in_the_runtime_refuses_before_physics(
     mujoco_fixture: ExecutionFixture,
     mujoco_identity: dict,
+    mujoco_qualification: dict,
     b2_runtime,
 ) -> None:
     profile, runtime = b2_runtime
@@ -231,13 +299,16 @@ def test_a_late_hardlink_in_the_runtime_refuses_before_physics(
             runtime,
             profile,
             identity=mujoco_identity,
+            expected_trajectory_sha256=mujoco_qualification["nominal"]["diagnostic"][
+                "trajectory_sha256"
+            ],
             tamper=tamper,
         )
     finally:
         alias.unlink(missing_ok=True)
 
     observation = result.observation
-    assert observation.verdict == "refused"
+    assert observation.verdict == "refused", _failure_context(observation)
     assert observation.receipt is not None
     assert observation.receipt.completed is False
     assert observation.receipt.physics is None
@@ -279,5 +350,6 @@ def test_an_unavailable_mechanism_is_refused_not_downgraded(
             runtime,
             profile,
             identity=mujoco_identity,
+            expected_trajectory_sha256="0" * 64,
             force_mechanism_unavailable=True,
         )

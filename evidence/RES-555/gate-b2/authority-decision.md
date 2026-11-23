@@ -21,6 +21,12 @@ the owner can decide with evidence rather than a design document.
 - Existing production boundary: `execute_preflighted` launches the selected diagnostic worker
   with protocol v1 and writes only `diagnostics.json` / `logs/`. `physics.load_model()` still
   reads the packaged XML. `PrepareExecutionInputs` has no production execution caller.
+- Adapter identity change: the probe needs the same `physics.compile_model()` entry point to
+  compile verified input bytes. `physics.py` is part of `ADAPTER_SOURCE_FILES`, so the
+  adapter implementation digest changes. No existing acceptance is silently re-used: the
+  owner must re-accept the adapter identity (and therefore its implementation digest) before
+  any production materialized route. `load_model()` and the packaged-model path are
+  unchanged.
 - Existing A1 boundary: `WorkerInputBinding`, `verify_worker_input_view`, anchored Windows and
   Linux readers. A1 proves sequential content identity on mutable storage; it is not OS
   immutability or read containment.
@@ -35,8 +41,8 @@ admission refuses and no weaker fallback is attempted.
 
 | Platform | Proposed mechanism | Worker principal | Input | Runtime | Scratch | Scientific sources / staging / sealed | Network |
 |---|---|---|---|---|---|---|---|
-| Windows x86-64 | AppContainer profile per attempt (`CreateAppContainerProfile` + `SECURITY_CAPABILITIES` + Job Object limits) | AppContainer package SID; no capabilities | read-only | read/execute-only | read/write | denied by token (no user SID, no capability) | denied (no `internetClient` capability) |
-| Linux x86-64 | Landlock ABI ≥ 4 (`landlock_create_ruleset` / `landlock_add_rule` / `landlock_restrict_self`) plus `PR_SET_NO_NEW_PRIVS`, zero capabilities, rlimits | same UID in an irreversible Landlock domain | read-only | read/execute-only | read/write | denied by allowlist | denied by handled TCP bind/connect with no allow rules |
+| Windows x86-64 | AppContainer profile per attempt (`CreateAppContainerProfile` + `SECURITY_CAPABILITIES` + Job Object limits with an active-process limit of 8) | AppContainer package SID; no capabilities | read-only | read/execute-only | read/write | denied by token (no user SID, no capability) | denied (no `internetClient` capability; outbound TCP/UDP) |
+| Linux x86-64 | Landlock ABI ≥ 4 (`landlock_create_ruleset` / `landlock_add_rule` / `landlock_restrict_self`) plus `PR_SET_NO_NEW_PRIVS`, zero capabilities, rlimits | same UID in an irreversible Landlock domain | read-only | read/execute-only | read/write | denied by allowlist | TCP bind/connect denied by handled access with no allow rules; UDP, raw and Unix-domain sockets are **not** restricted by this profile |
 
 Residual threat model, stated so it is not mistaken for a stronger claim:
 
@@ -51,10 +57,21 @@ Residual threat model, stated so it is not mistaken for a stronger claim:
   `NoNewPrivs`, capability and (on Windows) AppContainer token facts, and verifies behavior
   from inside the worker. A substituted bootstrap could decline to apply Landlock; the
   supervisor measures and hashes the bootstrap and the whole runtime, and denies the worker
-  write access to that runtime.
+  write access to that runtime. The worker-written `sandbox-ready.json` is a configuration
+  echo, not independent proof; the external token/`proc` facts and the in-worker probes are
+  the isolation evidence.
 - Aggregate scratch quota is not claimed in this increment. Windows uses Job memory limits and
   post-exit size checks; Linux uses `RLIMIT_FSIZE`, `RLIMIT_AS`, `RLIMIT_CPU` and post-exit
-  checks. A kernel-enforced aggregate directory quota remains a named production gap.
+  checks. The profile records `scratch_limit_enforcement: post-exit-acceptance-bound` so the
+  claim cannot be read as prevention. A kernel-enforced aggregate directory quota remains a
+  named production gap.
+- No Linux process-count bound is claimed. Windows enforces a Job Object active-process limit
+  of 8; the Linux profile records `max_processes: null`. A process that calls `setsid()`
+  leaves the supervisor's process group, so process-tree cleanup is best effort. A
+  supervisor-owned cgroup or equivalent limit is a named production gap.
+- Network denial is not equivalent across platforms. The Linux scope is TCP only; UDP, raw and
+  Unix-domain sockets remain available to a same-UID worker. The supervisor canary measures
+  the TCP channel only.
 
 ### D4 — Request/receipt binding (hard)
 
@@ -101,8 +118,11 @@ A worker self-report alone is not authenticity. The proposed bounded observation
   2,000-step diagnostic and trajectory digest, and in-worker read/write/network probe results.
 - **Supervisor observation** (`supervisor-observation.json`, test evidence only): its own
   profile, measured runtime closure, external AppContainer/Landlock observations, process
-  facts, the receipt digest, and the independently recomputed reference comparison. The
-  supervisor is the author of the correlation; the worker remains untrusted.
+  facts, the receipt digest, the supervisor's own comparison of the receipt trajectory with
+  the separately qualified reference digest (`numerical_reference`), and the independently
+  recomputed reference comparison. The supervisor is the author of the correlation; the
+  worker remains untrusted. Only the positive materialized test names this file; every
+  negative and verify-only test runs without an evidence name and cannot overwrite it.
 
 This is **not** native evidence, not `native/`, not canonical, not assessment, and not sealed.
 Native extraction and sealing stay blocked on ADR-027's output contract.
@@ -123,8 +143,9 @@ The probe is designed to demonstrate, on an exact commit and both qualified plat
 
 It does **not** demonstrate owner approval, a production launch route, native output capture,
 sealing, canonicalization, assessment, cross-platform numerical equivalence, an aggregate
-disk quota, or vendor-authenticated wheels. A successful probe run is evidence for the exact
-tree, not acceptance of any decision above.
+disk quota, a Linux process-count bound, UDP/Unix-socket network denial, or
+vendor-authenticated wheels. A successful probe run is evidence for the exact tree, not
+acceptance of any decision above.
 
 ## 4. Owner action
 
@@ -136,7 +157,10 @@ To activate a production materialized-worker route, the owner must record in Lin
 3. Runtime closure: accept measured-snapshot semantics and name the artifact-trust gap.
 4. Consumption receipt: accept the sidecar schema and supervisor correlation as the only
    admissibility evidence, with the worker self-report treated as untrusted input.
-5. ADR-027: adopt the native-output/output-policy rows before any native extraction or seal.
+5. Adapter identity: re-accept the MuJoCo adapter implementation digest produced by the
+   added `physics.compile_model()` entry point. The packaged `load_model()` path is unchanged;
+   the digest change is not retroactively covered by an earlier acceptance.
+6. ADR-027: adopt the native-output/output-policy rows before any native extraction or seal.
 
 Until then, the only executable increment is the probe-only qualification described in
 `python/tools/res555_gate_b2/README.md`. No production route is enabled by this packet.

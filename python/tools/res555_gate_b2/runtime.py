@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -174,9 +175,16 @@ class ProtectedRuntimeError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class RuntimeEnvironment:
-    """The installed environment facts the probe needs, measured from the interpreter."""
+    """The installed environment facts the probe needs, measured from the interpreter.
+
+    ``executable`` is the launch path (a venv interpreter on Linux), while
+    ``resolved_executable`` is the byte-identical target used for closure hashing.
+    Launching the resolved base interpreter directly would discard the venv's
+    site-packages selection and is not the environment the qualification selected.
+    """
 
     executable: Path
+    resolved_executable: Path
     base_prefix: Path
     site_packages: Path
     source_root: Path
@@ -198,6 +206,7 @@ class ProtectedRuntime:
     bootstrap_digest: str
     model_asset_scan_files: int
     removed_base_site_packages: tuple[str, ...]
+    registry_root: Path
 
     @property
     def matches(self) -> bool:
@@ -257,7 +266,8 @@ def _run_environment_probe(worker_python: Path) -> RuntimeEnvironment:
         value = json.loads(completed.stdout)
     except json.JSONDecodeError as error:
         raise ProtectedRuntimeError("the worker environment probe did not emit JSON") from error
-    executable = Path(value["executable"]).resolve()
+    launch_executable = Path(value["executable"])
+    resolved_executable = launch_executable.resolve()
     base_prefix = Path(value["base_prefix"]).resolve()
     candidates = [Path(item).resolve() for item in value["site_packages"]]
     site_packages = next((item for item in candidates if item.is_dir()), None)
@@ -265,7 +275,8 @@ def _run_environment_probe(worker_python: Path) -> RuntimeEnvironment:
         raise ProtectedRuntimeError("the worker environment has no site-packages directory")
     source_root = Path(dynamisbench.__file__).resolve().parent.parent
     for label, path in (
-        ("executable", executable),
+        ("executable", launch_executable),
+        ("resolved executable", resolved_executable),
         ("base_prefix", base_prefix),
         ("site_packages", site_packages),
         ("source_root", source_root),
@@ -273,17 +284,26 @@ def _run_environment_probe(worker_python: Path) -> RuntimeEnvironment:
         if not path.exists():
             raise ProtectedRuntimeError(f"the worker environment {label} is absent")
     return RuntimeEnvironment(
-        executable=executable,
+        executable=launch_executable,
+        resolved_executable=resolved_executable,
         base_prefix=base_prefix,
         site_packages=site_packages,
         source_root=source_root,
     )
 
 
+def _system32_tool(name: str) -> str:
+    root = os.environ.get("SYSTEMROOT") or os.environ.get("SystemRoot") or "C:/Windows"
+    candidate = Path(root) / "System32" / name
+    if not candidate.is_file():
+        raise ProtectedRuntimeError(f"the system tool {name!r} is not present in System32")
+    return str(candidate)
+
+
 def _robocopy(source: Path, destination: Path) -> None:
     completed = subprocess.run(
         [
-            "robocopy",
+            _system32_tool("robocopy.exe"),
             str(source),
             str(destination),
             "/E",
@@ -385,9 +405,17 @@ def prepare_runtime(
     worker_python: Path,
     root: Path,
     platform_tag: str,
+    registry_root: Path | None = None,
 ) -> ProtectedRuntime:
-    """Create and measure the probe runtime snapshot under ``root``."""
+    """Create and measure the probe runtime snapshot under ``root``.
+
+    ``registry_root`` is the supervisor-owned single-use marker directory. It defaults to
+    a fresh system temporary directory and must remain outside the sandbox-visible tree.
+    """
     environment = _run_environment_probe(worker_python)
+    if registry_root is None:
+        registry_root = Path(tempfile.mkdtemp(prefix="res555-b2-registry-"))
+    registry_root.mkdir(parents=True, exist_ok=True)
     root.mkdir(parents=True, exist_ok=True)
     runtime_root = root
     if platform_tag == "windows-x86-64":
@@ -435,7 +463,7 @@ def prepare_runtime(
         model_path = source_copy / "dynamisbench" / "adapters" / "mujoco" / _MODEL_ASSET
         model_path.unlink(missing_ok=True)
         launch_interpreter = environment.executable
-        resolved_interpreter = launch_interpreter.resolve()
+        resolved_interpreter = environment.resolved_executable
         base_for_worker = environment.base_prefix
         site_for_worker = site_copy
         source_for_worker = source_copy
@@ -497,4 +525,5 @@ def prepare_runtime(
         bootstrap_digest=bootstrap_digest,
         model_asset_scan_files=checked,
         removed_base_site_packages=removed,
+        registry_root=registry_root,
     )
