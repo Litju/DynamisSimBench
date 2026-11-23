@@ -311,6 +311,34 @@ def test_offline_view_survives_relocation_and_source_cache_deletion(
     _assert_no_run(model_fixture)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS root alias fixture")
+@pytest.mark.parametrize("alias", ["case", "ancestor-case", "short"])
+def test_offline_view_refuses_ntfs_root_alias(
+    candidate_view: tuple[Path, PreparedExecutionInputs, WorkerInputBinding],
+    alias: str,
+) -> None:
+    root, prepared, binding = candidate_view
+    assert prepared.request is not None
+    verify_worker_input_view(root, expected=binding, request=prepared.request)
+    if alias == "case":
+        alternate = root.with_name(root.name.swapcase())
+    elif alias == "ancestor-case":
+        alternate = root.parent.with_name(root.parent.name.swapcase()) / root.name
+    else:
+        import ctypes
+
+        short_path = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = short_path(str(root), buffer, len(buffer))
+        assert 0 < length < len(buffer)
+        alternate = Path(buffer.value)
+        if str(alternate).casefold() == str(root).casefold():
+            pytest.skip("NTFS did not create a short alias")
+    assert alternate.samefile(root)
+    with pytest.raises(MaterializationError, match="exact NTFS path"):
+        verify_worker_input_view(alternate, expected=binding, request=prepared.request)
+
+
 @pytest.mark.parametrize(
     ("relative", "mutation"),
     [
