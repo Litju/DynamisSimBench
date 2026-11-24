@@ -18,6 +18,7 @@ export type ModuleTarget =
   | { readonly kind: "open-workspace" }
   /** The workspace the shell currently has context for; needs one. */
   | { readonly kind: "workspace" }
+  | { readonly kind: "external-results" }
   /** The Laboratory route, on a folio, bound to the current workspace when there is one. */
   | { readonly kind: "folio"; readonly folio: Folio };
 
@@ -54,6 +55,13 @@ export const MODULE_GROUPS: readonly ModuleGroup[] = [
         availability: "available",
         note: "Explorer, source content and Inspector",
         target: { kind: "workspace" },
+      },
+      {
+        id: "external-results",
+        label: "External results",
+        availability: "available",
+        note: "Inspect recorded CSV signals and their source hashes",
+        target: { kind: "external-results" },
       },
       {
         id: "model-atlas",
@@ -186,7 +194,7 @@ export const MODULE_GROUPS: readonly ModuleGroup[] = [
 
 /** The opaque identifier shape the API mints; anything else is not a workspace. */
 const WORKSPACE_TOKEN = /^[A-Za-z0-9_-]{1,128}$/;
-const WORKSPACE_PATH = /^\/workspace\/([^/]+)\/?$/;
+const WORKSPACE_PATH = /^\/workspace\/([^/]+)(?:\/results)?\/?$/;
 
 /**
  * The workspace the shell is looking at, if any: the path's identifier on the workspace
@@ -216,7 +224,7 @@ export function workspaceContext(pathname: string, search: unknown): string | nu
 export type ResolvedEntry =
   | {
       readonly kind: "link";
-      readonly to: "/" | "/laboratory" | "/workspace/$workspaceId";
+      readonly to: "/" | "/laboratory" | "/workspace/$workspaceId" | "/workspace/$workspaceId/results";
       readonly hash?: string;
       readonly params?: { readonly workspaceId: string };
       readonly search?: { readonly workspace?: string; readonly folio?: Folio };
@@ -243,6 +251,10 @@ export function resolveEntry(entry: ModuleEntry, workspaceId: string | null): Re
       return workspaceId === null
         ? { kind: "blocked", reason: "Open a workspace first" }
         : { kind: "link", to: "/workspace/$workspaceId", params: { workspaceId } };
+    case "external-results":
+      return workspaceId === null
+        ? { kind: "blocked", reason: "Open a workspace to browse results" }
+        : { kind: "link", to: "/workspace/$workspaceId/results", params: { workspaceId } };
     case "folio":
       return {
         kind: "link",
