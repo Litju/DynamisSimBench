@@ -15,13 +15,17 @@ granted to the package SID.
 from __future__ import annotations
 
 import ctypes
-import msvcrt
 import os
 import subprocess
 from collections.abc import Mapping
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any, Final
+
+try:
+    import msvcrt as _msvcrt
+except ImportError:  # pragma: no cover - exercised by the Linux collection gate
+    _msvcrt = None
 
 __all__ = [
     "AppContainerError",
@@ -222,7 +226,7 @@ def _check_bool(ok: Any, what: str) -> None:
 
 
 def _open_osfhandle(handle: int, flags: int) -> int:
-    opener = getattr(msvcrt, "open_osfhandle", None)
+    opener = getattr(_msvcrt, "open_osfhandle", None)
     if opener is None:
         raise AppContainerError("msvcrt.open_osfhandle is unavailable")
     return int(opener(handle, flags))
