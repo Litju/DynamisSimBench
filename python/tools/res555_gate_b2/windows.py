@@ -47,6 +47,7 @@ _TOKEN_IS_APPCONTAINER: Final = 29
 _TOKEN_APPCONTAINER_SID: Final = 31
 _TOKEN_IS_RESTRICTED: Final = 40
 _PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES: Final = 0x00020009
+_PROC_THREAD_ATTRIBUTE_HANDLE_LIST: Final = 0x00020002
 _EXTENDED_STARTUPINFO_PRESENT: Final = 0x00080000
 _CREATE_SUSPENDED: Final = 0x00000004
 _CREATE_NO_WINDOW: Final = 0x08000000
@@ -459,13 +460,21 @@ class AppContainerProfile:
             self.sid = None
 
 
-def grant_tree(path: Path, sid_string: str, access: str) -> None:
+def grant_tree(
+    path: Path,
+    sid_string: str,
+    access: str,
+    *,
+    user_access: str = "(OI)(CI)(F)",
+) -> None:
     """Replace one tree's DACL with the package SID, the user and the system principals.
 
-    ``access`` is an ``icacls`` rights expression such as ``(OI)(CI)(RX)``. Inheritance is
-    replaced on the root only; children inherit the new ACEs dynamically. The interactive
-    user and the two system principals retain full control so the supervisor can delete
-    the profile after the attempt.
+    ``access`` is the worker's rights expression (for example ``(OI)(CI)(RX)``).
+    ``user_access`` is the interactive supervisor user's expression. Runtime and input
+    trees use ``(OI)(CI)(RX,DE,DC)``: the same user cannot write their contents during an
+    attempt, but can still delete them for cleanup. The package SID never receives write
+    access to a read-only view, and the two system principals retain full control. The
+    scratch tree gives the user full control because the supervisor must read the receipt.
     """
     if not path.is_dir():
         raise AppContainerError("an AppContainer grant target is not a directory")
@@ -477,7 +486,7 @@ def grant_tree(path: Path, sid_string: str, access: str) -> None:
         "/grant:r",
         f"*{sid_string}:{access}",
         "/grant:r",
-        f"*{user}:(OI)(CI)(F)",
+        f"*{user}:{user_access}",
         "/grant:r",
         "*S-1-5-18:(OI)(CI)(F)",
         "/grant:r",
@@ -487,6 +496,38 @@ def grant_tree(path: Path, sid_string: str, access: str) -> None:
     if completed.returncode != 0:
         raise AppContainerError(
             f"icacls could not grant the probe DACL at {path.name!r}: "
+            f"{completed.stderr.strip()[:200]}"
+        )
+
+
+def restore_user_control(path: Path) -> None:
+    """Re-grant the interactive user full control after an attempt has ended.
+
+    The runtime snapshot is session-scoped. During an attempt the user has only
+    ``RX,DE,DC`` so the worker's measured bytes cannot be rewritten under it. After the
+    attempt, the next attempt's pre-launch closure re-measurement is the detection point,
+    and the user needs write access to stage a deliberately substituted runtime in a test
+    or a controlled repair. This helper changes only the user's ACE; the package-SID ACE
+    and the system principals remain.
+    """
+    if not path.is_dir():
+        raise AppContainerError("an AppContainer restore target is not a directory")
+    user = current_user_sid()
+    completed = subprocess.run(
+        [
+            _system32_tool("icacls.exe"),
+            str(path),
+            "/grant:r",
+            f"*{user}:(OI)(CI)(F)",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise AppContainerError(
+            f"icacls could not restore user control at {path.name!r}: "
             f"{completed.stderr.strip()[:200]}"
         )
 
@@ -744,11 +785,11 @@ class AppContainerProcess:
                 )
 
             size = ctypes.c_size_t(0)
-            api.InitializeProcThreadAttributeList(None, 1, 0, ctypes.byref(size))
+            api.InitializeProcThreadAttributeList(None, 2, 0, ctypes.byref(size))
             attribute_buffer = ctypes.create_string_buffer(size.value)
             attribute_list = ctypes.cast(attribute_buffer, ctypes.c_void_p)
             _check_bool(
-                api.InitializeProcThreadAttributeList(attribute_list, 1, 0, ctypes.byref(size)),
+                api.InitializeProcThreadAttributeList(attribute_list, 2, 0, ctypes.byref(size)),
                 "InitializeProcThreadAttributeList",
             )
             attribute_initialized = True
@@ -764,6 +805,23 @@ class AppContainerProcess:
                     None,
                 ),
                 "UpdateProcThreadAttribute(SECURITY_CAPABILITIES)",
+            )
+            # Do not inherit every inheritable handle the supervisor happens to hold. The
+            # child receives exactly its three stdio pipe ends; a socket, event or file the
+            # supervisor owns is not a worker transport by accident.
+            stdio_handles = (stdin_read, stdout_write, stderr_write)
+            handle_array = (wintypes.HANDLE * len(stdio_handles))(*stdio_handles)
+            _check_bool(
+                api.UpdateProcThreadAttribute(
+                    attribute_list,
+                    0,
+                    _PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                    ctypes.byref(handle_array),
+                    ctypes.sizeof(handle_array),
+                    None,
+                    None,
+                ),
+                "UpdateProcThreadAttribute(HANDLE_LIST)",
             )
             startup = _StartupInfoExW()
             startup.StartupInfo.cb = ctypes.sizeof(_StartupInfoExW)
