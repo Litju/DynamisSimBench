@@ -269,7 +269,8 @@ def _probe_raw():
 def _probe_unix(path: str | None):
     from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
 
-    if path is None or not hasattr(socket, "AF_UNIX"):
+    unix_family = getattr(socket, "AF_UNIX", None)
+    if path is None or unix_family is None:
         return ProbeObservation(
             name="network_unix",
             expectation="denied",
@@ -277,7 +278,7 @@ def _probe_unix(path: str | None):
             detail="AF_UNIX is unavailable in this interpreter",
         )
     try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock = socket.socket(unix_family, socket.SOCK_STREAM)
         try:
             sock.connect(path)
         finally:

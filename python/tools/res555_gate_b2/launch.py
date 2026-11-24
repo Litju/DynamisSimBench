@@ -871,11 +871,14 @@ def run_protected_probe(
             ]
             if cgroup is not None:
                 assert cgroup_observation is not None
+                pids_peak = cgroup_observation.get("pids_peak")
+                pids_events_max = cgroup_observation.get("pids_events_max")
+                assert isinstance(pids_peak, int)
+                assert isinstance(pids_events_max, int)
                 checks.append(
                     _check(
                         "cgroup_process_limit",
-                        int(cgroup_observation["pids_peak"]) <= isolation.max_processes
-                        and int(cgroup_observation["pids_events_max"]) == 0,
+                        pids_peak <= isolation.max_processes and pids_events_max == 0,
                         cgroup_observation,
                         {
                             "pids_peak_at_most": isolation.max_processes,

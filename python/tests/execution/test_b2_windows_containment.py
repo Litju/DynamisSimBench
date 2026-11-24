@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Iterator
 from ctypes import wintypes
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from tools.res555_gate_b2.scratch import ScratchWatchdog, measure_scratch
@@ -37,8 +38,17 @@ class _SecurityAttributes(ctypes.Structure):
     ]
 
 
+def _win32():
+    return cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
+
+
+def _last_error() -> int:
+    getter = getattr(ctypes, "get_last_error", None)
+    return int(getter()) if getter is not None else 0
+
+
 def _kernel32():
-    api = ctypes.WinDLL("kernel32", use_last_error=True)
+    api = _win32()
     api.CreateEventW.argtypes = [
         ctypes.POINTER(_SecurityAttributes),
         wintypes.BOOL,
@@ -85,7 +95,7 @@ def _appcontainer(
 
 
 def _create_inheritable_file(path: Path) -> tuple[int, str]:
-    api = ctypes.WinDLL("kernel32", use_last_error=True)
+    api = _win32()
     api.CreateFileW.argtypes = [
         wintypes.LPCWSTR,
         wintypes.DWORD,
@@ -107,14 +117,14 @@ def _create_inheritable_file(path: Path) -> tuple[int, str]:
         None,
     )
     if not handle:
-        raise OSError(ctypes.get_last_error(), "CreateFileW failed")
+        raise OSError(_last_error(), "CreateFileW failed")
     return int(handle.value) if hasattr(handle, "value") else int(handle), str(path)
 
 
 def test_only_the_stdio_pipe_handles_are_inherited(tmp_path: Path) -> None:
     secret = tmp_path / "res555-handle-secret.txt"
     secret.write_text("RES555-HANDLE-SECRET", encoding="utf-8")
-    api = ctypes.WinDLL("kernel32", use_last_error=True)
+    api = _win32()
     api.CloseHandle.argtypes = [wintypes.HANDLE]
     handle_value, secret_path = _create_inheritable_file(secret)
     script = r"""
