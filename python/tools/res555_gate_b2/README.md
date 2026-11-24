@@ -67,7 +67,9 @@ runs the tests through `exec_in_cgroup.sh`. That wrapper is **test-host provisio
 the production mechanism: it uses the runner's passwordless sudo once to move the test shell
 into the supervisor cgroup and then keeps the original user and environment. A production
 supervisor must receive the same delegation from its service manager (`Delegate=yes`) and a
-provisioned scratch mount; the probe fails closed if either is absent.
+provisioned scratch mount. The cgroup delegation is a hard requirement and its absence is a
+failure; without the scratch mount the probe records the sampled-watchdog fallback, which is
+truthful but **not production-eligible** for an aggregate-bound claim.
 
 Run locally:
 

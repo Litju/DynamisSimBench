@@ -505,6 +505,9 @@ def _linux_allowlists(
         # The worker's own descriptor table is a read-only observation surface used by the
         # inherited-socket probe. It exposes no file content; the probe fstats the fd numbers.
         "/proc/self/fd",
+        # The seccomp installer refuses a multithreaded process and the bootstrap records
+        # its filter status from this file. It is a read-only process observation.
+        "/proc/self/status",
     ]
     read_write = [str(scratch)]
     return read_execute, read_only, read_write

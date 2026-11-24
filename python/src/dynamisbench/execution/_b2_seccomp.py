@@ -245,6 +245,17 @@ def seccomp_available() -> bool:
     return "errno" in actions and "kill_process" in actions
 
 
+def _single_threaded() -> bool:
+    try:
+        for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
+            name, _, value = line.partition(":")
+            if name == "Threads":
+                return int(value.strip()) == 1
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def apply_network_policy() -> None:
     """Install the fixed filter and verify it is active.
 
@@ -256,6 +267,11 @@ def apply_network_policy() -> None:
         raise SeccompUnavailableError("seccomp is only available on Linux")
     if not seccomp_available():
         raise SeccompUnavailableError("this kernel does not expose seccomp filter mode")
+    if not _single_threaded():
+        raise SeccompError(
+            "the seccomp policy must be installed from a single-threaded process; "
+            "prctl(PR_SET_SECCOMP) filters only the calling thread"
+        )
     array, fprog = _program()
     try:
         # ``array`` owns the instruction storage; ``fprog`` holds only a pointer to it, so

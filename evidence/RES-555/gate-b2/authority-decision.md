@@ -223,8 +223,11 @@ distribution closure, not an authenticated builder chain.
 the implementation digest from the sandbox source (using the verified input-view model digest
 for the removed packaged XML) and refuses if it differs from the request's digest. The
 existing packaged `load_model()` path and the qualified 2,000-step reference trajectory are
-unchanged. The owner must explicitly re-accept the new adapter implementation digest; this
-packet does not do so and does not alter historical reference evidence.
+unchanged. The probe harness modules themselves (`_b2_probe_common`, `_b2_probe_worker`,
+`_b2_landlock`, `_b2_seccomp`) are covered by the measured runtime source closure, not by the
+adapter `ADAPTER_SOURCE_FILES` digest; that separation is explicit. The owner must explicitly
+re-accept the new adapter implementation digest; this packet does not do so and does not alter
+historical reference evidence.
 
 ## 4. Decision matrix
 
@@ -259,7 +262,8 @@ The probe is designed to demonstrate, on an exact commit and both qualified plat
 - Linux cgroup containment of `fork`/`setsid`/orphan descendants and a qualified task limit;
 - Windows stdio-only handle inheritance and Job Object descendant cleanup;
 - an over-budget scratch write either failing against a dedicated filesystem (Linux when
-  provisioned) or being interrupted by a sampled watchdog (Windows/Linux without one).
+  provisioned) or being interrupted by a sampled watchdog (Windows/Linux without one; a fast
+  writer can exceed the bound before the next sample, so this is not a hard quota).
 
 It does **not** demonstrate owner approval, a production launch route, native output capture,
 sealing, canonicalization, assessment, cross-platform numerical equivalence, a universal
