@@ -18,8 +18,13 @@ the owner can decide with evidence rather than a design document.
 - Qualified integration head: `911d2e6` (`res-555-b2-main-qualification`), workflow_dispatch
   `45270650148`: all 10 jobs successful. That result qualifies `911d2e6` only; it is not a
   qualification of an unchanged old PR head.
-- Hardening head: **PENDING** (this packet's branch head; the exact SHA and hosted run are
-  recorded in the final report and must be read from the exact head, not from this paragraph).
+- Hardening code head: `cc4e4a8`. Hosted workflow_dispatch `45407028581` qualified the
+  Linux `python (linux-x64)` job: 2871 passed, 17 skipped, the dedicated B2 step 23 passed,
+  and the Linux B2 observation verdict was `demonstrated`. The Windows `python` job in that
+  run failed only the descendant-harness test (a child `Popen` used the null device); the
+  test harness is fixed in the exact PR head. The final exact PR head and its rerun are
+  recorded in the final report; the earlier `911d2e6` result is **not** a qualification of
+  this head.
 - A1 stack: PR #31 `bfd5e6a` → PR #32 `e705841` → PR #34 `5860904`. A1 verification,
   materialization and the 2,000-step reference trajectory are unchanged by this increment.
 - Accepted: ADR-026 (InputManifest v1, disposable CACHE, admission binding, self-contained
@@ -103,6 +108,13 @@ cross-platform result; the matrix in §4 names the unverified assumptions.
   over-capacity write fails while the worker is alive (ENOSPC); the probe declares
   `dedicated-filesystem`. Without one, it uses the sampled watchdog and says so. The
   post-exit acceptance check is separate and is never called prevention.
+- **Observed runtime helper:** importing MuJoCo's GLFW viewer dependency launches a
+  short-lived Python helper using the worker interpreter. Under Landlock that helper is
+  denied the worker venv's `pyvenv.cfg`; it exits and its bounded stderr is retained while
+  the headless 2,000-step worker completes. The cgroup records and reaps the helper
+  (`pids.peak=5`, no attempt task remained), so this is a contained runtime process
+  requirement, not an escape or a silent fallback. It is the reason the Linux
+  observation's stderr excerpt is non-empty even on a demonstrated run.
 - **Local diagnostic limit:** the WSL development kernel exposes Landlock ABI 3. The full
   Linux materialized/verify-only B2 integration was exercised there for mechanism debugging
   only (cgroup + seccomp + runtime + dependency closure + probes + receipt), but the
@@ -249,6 +261,33 @@ sealing, canonicalization, assessment, cross-platform numerical equivalence, a u
 hard disk quota on every host, a Linux same-UID immutable store, Windows `socketpair`
 elimination, vendor-authenticated wheels, or kernel-exploit resistance. A successful probe run
 is evidence for the exact tree, not acceptance of any decision above.
+
+### 2.4 Hosted exact-head evidence
+
+`workflow_dispatch` run `45407028581` on code head `cc4e4a8`:
+
+- `python (linux-x64)`: **success**. The full suite in the supervisor cgroup was
+  2871 passed / 17 skipped; the dedicated B2 step was 23 passed. The downloaded
+  `res555-gate-b2-linux-x64` observation is `verdict=demonstrated` with 36/36 checks
+  passing: Landlock ABI 8, `Seccomp: 2` with one filter, `NoNewPrivs=1`, zero effective
+  capabilities, worker cgroup `/dynamisbench/res555-…`, `pids.max=64`, `pids.peak=5`,
+  `pids.events.max=0`, `populated=false`, `cgroup_cleaned=true`, dedicated 64 MiB tmpfs
+  scratch with 8,070 bytes used, zero TCP/UDP/Unix canary traffic, no inherited socket
+  descriptors, exact model SHA-256
+  `eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd`, 2,000 steps and
+  trajectory `f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf`
+  matching the qualified reference.
+- `python (windows-x64)`: **failure only in the descendant-harness test**; 2868 passed / 19
+  skipped. The child `Popen` used `subprocess.DEVNULL`; the AppContainer worker returned 1
+  before the job-containment assertion. The harness now uses pipes and reports the child's
+  stderr; no product code changed. The exact PR head rerun is the authoritative Windows
+  result.
+- `platform-identity`, `frontend` and `desktop` on both images: success. The two comparison
+  jobs were skipped because `python` failed; they rerun on the exact PR head.
+
+The Python job's stderr excerpt for the demonstrated Linux observation retains a
+`pyvenv.cfg` permission error from MuJoCo's short-lived GLFW helper; the same cgroup records
+and reaps it (`pids.peak=5`, `populated=false`). It is described in §2.2, not suppressed.
 
 ## 6. Independent review
 

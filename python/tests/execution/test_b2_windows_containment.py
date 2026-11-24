@@ -168,15 +168,18 @@ def test_a_descendant_that_outlives_its_direct_parent_stays_in_the_job() -> None
 import subprocess, sys
 child = subprocess.Popen(
     [sys.executable, "-I", "-c", "import time; time.sleep(30)"],
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
 )
+child.stdout.close()
+child.stderr.close()
 print(child.pid, flush=True)
 """
     with _appcontainer(script) as (_profile, _scratch, process):
         stdout = process.stdout.read()
+        stderr = process.stderr.read()
         process.wait(10.0)
-        assert process.returncode == 0
+        assert process.returncode == 0, stderr.decode("utf-8", "replace")
         assert int(stdout.strip()) > 0
         deadline = time.monotonic() + 5.0
         active = 0

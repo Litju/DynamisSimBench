@@ -120,6 +120,11 @@ CI sets it and treats an unavailable mechanism as a failure. There is no A1 fall
   attempt DACL closes content writes during execution and allows deletion; deletion is
   detected by the post-exit closure. A read-only volume or a different principal remains the
   stronger production answer.
+- **The MuJoCo/GLFW import launches a short-lived helper Python process.** Under the
+  Linux Landlock domain that helper cannot read the worker venv's `pyvenv.cfg`, so it exits
+  with a bounded stderr message while the headless reference worker continues. The cgroup
+  records and reaps it (`pids.peak=5` in the qualified run); it is a real task requirement,
+  not an escape. The stderr excerpt is retained rather than suppressed.
 - **Runtime provenance is measured bytes, not a vendor signature.** The dependency closure
   and interpreter are hashed; the wheel/builder identity is not authenticated.
 - **Adapter identity changed.** `physics.compile_model()` is part of

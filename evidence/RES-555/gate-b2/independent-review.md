@@ -98,9 +98,14 @@ Signature / disposition (approve, approve with conditions, reject):
 - `python/tests/execution/test_b2_scratch_budget.py` — exact measurement, explicit
   non-dedicated refusal, sampled-watchdog truthfulness, dedicated tmpfs ENOSPC. Local WSL
   Linux with a 64 MiB tmpfs: passed; local Windows: passed with the dedicated test skipped.
-- Hosted exact-head CI is the qualification result. The local WSL kernel exposes Landlock
-  ABI 3, so its full B2 integration run is a mechanism diagnostic, not a qualification of
-  the ABI >= 4 profile.
+- Hosted `workflow_dispatch` `45407028581` on code head `cc4e4a8`: `python (linux-x64)`
+  succeeded with 2871 passed / 17 skipped and 23 passed in the dedicated B2 step; the
+  downloaded Linux B2 observation was `demonstrated` with 36/36 checks. `python
+  (windows-x64)` failed only the descendant-harness test (a child `Popen` used
+  `subprocess.DEVNULL`); the harness is fixed in the exact PR head, whose rerun is the
+  authoritative Windows result. The local WSL kernel exposes Landlock ABI 3, so its full
+  B2 integration run is a mechanism diagnostic, not a qualification of the ABI >= 4
+  profile.
 
 ## Automated review (not human review)
 
