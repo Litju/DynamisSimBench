@@ -176,6 +176,22 @@ def test_cancellation_uses_the_same_subtree_kill(tmp_path: Path) -> None:
     assert attempt.path.exists() is False
 
 
+def test_timeout_uses_the_same_subtree_kill(tmp_path: Path) -> None:
+    root = _root()
+    attempt, process = _spawn(root, "import time; time.sleep(30)", name="timeout")
+    try:
+        try:
+            process.wait(0.2)
+        except subprocess.TimeoutExpired:
+            pass
+        attempt.kill()
+        assert attempt.wait_empty(5.0)
+        assert process.wait(5.0) is not None
+    finally:
+        _cleanup(attempt, process)
+    assert attempt.path.exists() is False
+
+
 def test_repeated_launches_leave_no_attempt_subtrees(tmp_path: Path) -> None:
     root = _root()
     names: list[str] = []
@@ -193,6 +209,8 @@ def test_repeated_launches_leave_no_attempt_subtrees(tmp_path: Path) -> None:
 
 def test_failed_setup_does_not_leave_a_subtree(tmp_path: Path) -> None:
     root = _root()
+    if not (root / "cpu.max").exists():
+        pytest.skip("the delegated root does not expose the optional cpu controller")
     name = f"bad-{os.getpid()}-{time.time_ns()}"
     with pytest.raises(CgroupError):
         CgroupV2.create(

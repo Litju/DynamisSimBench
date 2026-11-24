@@ -297,7 +297,7 @@ jobs:
           uv run --frozen pytest -q \
             tests/execution/mujoco/test_b2_protected_consumption.py \
             tests/execution/mujoco/test_b2_protected_verify_only.py \
-            tests/execution/test_b2_windows_containment.py \
+            tests/execution/mujoco/test_b2_windows_containment.py \
             tests/execution/test_b2_scratch_budget.py
         env:
           DYNAMISBENCH_RES555_B2_PROBE: "1"

@@ -18,13 +18,12 @@ the owner can decide with evidence rather than a design document.
 - Qualified integration head: `911d2e6` (`res-555-b2-main-qualification`), workflow_dispatch
   `45270650148`: all 10 jobs successful. That result qualifies `911d2e6` only; it is not a
   qualification of an unchanged old PR head.
-- Hardening code head: `cc4e4a8`. Hosted workflow_dispatch `45407028581` qualified the
-  Linux `python (linux-x64)` job: 2871 passed, 17 skipped, the dedicated B2 step 23 passed,
-  and the Linux B2 observation verdict was `demonstrated`. The Windows `python` job in that
-  run failed only the descendant-harness test (a child `Popen` used the null device); the
-  test harness is fixed in the exact PR head. The final exact PR head and its rerun are
-  recorded in the final report; the earlier `911d2e6` result is **not** a qualification of
-  this head.
+- Hardening code head: `d2aa5ca`. Hosted workflow_dispatch `45409652528` completed all 10
+  jobs successfully, including both `python` jobs and both comparison jobs; the Linux full
+  suite was 2871 passed / 17 skipped with 23 passed in the dedicated B2 step. The exact PR
+  head adds the final security corrections listed in §2.4; its exact-head rerun is recorded
+  in the final report. The earlier `911d2e6` result is **not** a qualification of this
+  head.
 - A1 stack: PR #31 `bfd5e6a` → PR #32 `e705841` → PR #34 `5860904`. A1 verification,
   materialization and the 2,000-step reference trajectory are unchanged by this increment.
 - Accepted: ADR-026 (InputManifest v1, disposable CACHE, admission binding, self-contained
@@ -55,19 +54,21 @@ cross-platform result; the matrix in §4 names the unverified assumptions.
 - **Observed:** the AppContainer token has the expected package SID and no internet
   capability; outbound TCP connect times out and no connection reaches the supervisor's
   localhost canary; UDP `sendto` returns success but no datagram reaches the UDP canary; raw
-  send is denied; AF_UNIX is unavailable in the qualified interpreter; `socketpair` works as
-  local IPC. The profile therefore declares `network_access: restricted`, not `denied`.
+  send is denied; the Unix-domain attempt is denied and no connection reaches the canary;
+  `socketpair` works as local IPC. The profile therefore declares
+  `network_access: restricted`, not `denied`.
 - **Observed:** a deliberately inheritable non-stdio file handle is not inherited by the
   worker; the handle list is the mechanism.
 - **Observed:** a descendant that outlives its direct parent remains in the Job Object and is
   terminated by `TerminateJobObject`; cancellation leaves zero active processes; repeated
   launches leave none.
 - **Observed:** during an attempt the runtime, input and attempt trees grant the worker
-  `RX` and the interactive user `RX,DE,DC`; the same user can delete but cannot rewrite the
-  measured bytes. The user's full control is restored after the attempt so the next
-  pre-launch closure can stage a controlled substitution; the pre-launch and post-exit
-  closures detect a deletion or mutation. This closes content rewriting during the attempt,
-  not deletion denial-of-service.
+  `RX` and the interactive user `RX,DE,DC`, and the profile's AC folder is reduced from
+  package-SID full control to `RX`; a worker writing `..\` outside the measured scratch is
+  refused. The **worker token** cannot rewrite the measured bytes. The interactive user
+  owns the tree and can change its DACL, so this is not a same-user immutability barrier;
+  the pre/post closures and the user's post-attempt restore are detection and staging, not
+  prevention. Deletion is a denial-of-service residual and is detected post-exit.
 - **Scratch:** the standard desktop host has no dedicated volume; the probe uses a sampled
   supervisor watchdog (20 ms) and the post-exit exact measurement. An over-budget writer was
   killed while running, but a fast writer can exceed the bound before the next sample. This is
@@ -140,17 +141,21 @@ admission refuses and no weaker fallback is attempted.
 
 | Platform | Mechanism | Worker principal | Input | Runtime | Scratch | Scientific sources / staging / sealed | Network |
 |---|---|---|---|---|---|---|---|
-| Windows x86-64 | AppContainer profile per attempt (`CreateAppContainerProfile` + `SECURITY_CAPABILITIES`), Job Object with `ActiveProcessLimit=8`, stdio-only handle list, explicit DACLs | AppContainer package SID; no capabilities | read-only | read/execute-only | read/write | denied by token (no user SID, no capability) | restricted: outbound TCP/UDP dropped; raw send denied; AF_UNIX unavailable; `socketpair` local IPC remains |
+| Windows x86-64 | AppContainer profile per attempt (`CreateAppContainerProfile` + `SECURITY_CAPABILITIES`), Job Object with `ActiveProcessLimit=8`, stdio-only handle list, explicit DACLs | AppContainer package SID / lowbox restricted token; no capabilities | read-only | read/execute-only | read/write | denied by the intersection of the normal and restricted token checks (package SID); no capability | restricted: outbound TCP/UDP dropped; raw send denied; the Unix-domain attempt is denied and no connection reaches the canary; `socketpair` local IPC remains |
 | Linux x86-64 | Landlock ABI ≥ 4 + seccomp-BPF + supervisor-owned cgroup v2 subtree + `PR_SET_NO_NEW_PRIVS`, zero capabilities, rlimits | same UID in an irreversible Landlock/seccomp domain, in a supervisor cgroup | read-only | read/execute-only | read/write | denied by Landlock allowlist | denied through Landlock TCP deny **and** seccomp socket/`io_uring` policy; stdio pipes remain |
 
 Residual threat model, stated so it is not mistaken for a stronger claim:
 
 - **Same-user modification.** On Linux the worker is the same UID; a process outside the
-  sandbox can modify a runtime or input file between measurements. The supervisor measures
-  before launch and after exit and refuses a mismatch, but that is detection, not prevention.
-  A read-only volume or a different principal remains the stronger production answer. On
-  Windows the attempt DACL prevents content rewriting during the attempt and allows deletion;
-  deletion is detected post-exit.
+  sandbox can modify a runtime or input file between measurements, **including between the
+  worker's own source measurement and the import/execution of those bytes**. The supervisor
+  measures before process creation and after exit, the worker measures again at start, and a
+  mismatch is refused, but that is detection, not an immutable store. A read-only volume or a
+  different principal remains the stronger production answer. On Windows the attempt DACL
+  stops the worker token from rewriting and the AC folder from package-SID writes, but a
+  same-user owner can change the DACL and rewrite; deletion is also possible. Both are
+  detected post-exit, not prevented. Neither platform authenticates the interpreter or wheel
+  builder.
 - **Runtime authenticity.** File hashes identify bytes, not a vendor signature. The file-level
   closure does not prove the wheel was published by an approved builder; the lockfile and
   distribution provenance are inputs to, not a substitute for, an artifact-trust decision.
@@ -168,9 +173,9 @@ Residual threat model, stated so it is not mistaken for a stronger claim:
   bound; it is host-provisioned. The sampled watchdog is not a hard quota. The post-exit
   measurement is an acceptance check only. `RLIMIT_FSIZE` is per-file, not aggregate.
 - **Network.** Linux denies the socket families through two independent controls. Windows
-  AppContainer drops outbound IP traffic and raw send but leaves `socketpair` as local IPC;
-  AF_UNIX is absent in the qualified interpreter. The profile does not claim universal
-  no-socket isolation on Windows.
+  AppContainer drops outbound IP traffic, denies raw send and denies the Unix-domain attempt,
+  but leaves `socketpair` as local IPC. The profile does not claim universal no-socket
+  isolation on Windows.
 - **Kernel exploit surface.** Neither mechanism makes the process kernel-exploit-proof, and
   neither authenticates the host kernel.
 
@@ -264,10 +269,13 @@ is evidence for the exact tree, not acceptance of any decision above.
 
 ### 2.4 Hosted exact-head evidence
 
-`workflow_dispatch` run `45407028581` on code head `cc4e4a8`:
+`workflow_dispatch` run `45409652528` on code head `d2aa5ca`:
 
-- `python (linux-x64)`: **success**. The full suite in the supervisor cgroup was
-  2871 passed / 17 skipped; the dedicated B2 step was 23 passed. The downloaded
+- **All 10 jobs succeeded**, including `python (linux-x64)`, `python (windows-x64)`,
+  `platform-identity`, `frontend`, `desktop`, `mujoco-receipt-comparison` and
+  `res555-gate-b2-comparison`.
+- `python (linux-x64)`: the full suite in the supervisor cgroup was 2871 passed / 17
+  skipped; the dedicated B2 step was 23 passed. The downloaded
   `res555-gate-b2-linux-x64` observation is `verdict=demonstrated` with 36/36 checks
   passing: Landlock ABI 8, `Seccomp: 2` with one filter, `NoNewPrivs=1`, zero effective
   capabilities, worker cgroup `/dynamisbench/res555-…`, `pids.max=64`, `pids.peak=5`,
@@ -276,14 +284,21 @@ is evidence for the exact tree, not acceptance of any decision above.
   descriptors, exact model SHA-256
   `eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd`, 2,000 steps and
   trajectory `f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf`
-  matching the qualified reference.
-- `python (windows-x64)`: **failure only in the descendant-harness test**; 2868 passed / 19
-  skipped. The child `Popen` used `subprocess.DEVNULL`; the AppContainer worker returned 1
-  before the job-containment assertion. The harness now uses pipes and reports the child's
-  stderr; no product code changed. The exact PR head rerun is the authoritative Windows
-  result.
-- `platform-identity`, `frontend` and `desktop` on both images: success. The two comparison
-  jobs were skipped because `python` failed; they rerun on the exact PR head.
+  matching the committed reference in `reference-observation.json`.
+- `python (windows-x64)`: the full suite and dedicated B2 step succeeded. The Windows
+  observation is `demonstrated` with the sampled scratch watchdog and zero TCP/UDP/Unix
+  canary traffic.
+- `res555-gate-b2-comparison`: passed with identical model and trajectory digests.
+
+The exact PR head adds the final security corrections derived from independent review:
+the AppContainer AC folder is reduced from package-SID full control to `RX`, the attempt is
+created outside AC with explicit `..`/AC escape probes, the Administrators group is not
+granted, the same-user DACL limitation is stated as detection-only, the memory cgroup
+controller and `pids.peak` are required, socketpair/`io_uring` are probed inside the worker,
+seccomp covers inherited-socket data paths, and the Windows containment tests use the
+measured snapshot instead of rewriting host Python DACLs. Those are code/test hardening
+changes; the final exact-head CI result is recorded in the final report and must be read
+from that head.
 
 The Python job's stderr excerpt for the demonstrated Linux observation retains a
 `pyvenv.cfg` permission error from MuJoCo's short-lived GLFW helper; the same cgroup records

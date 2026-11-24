@@ -3,8 +3,11 @@
 Landlock ABI 4 denies TCP bind/connect, but it does not handle UDP, raw sockets,
 Unix-domain sockets or an inherited socket descriptor. That is a narrower fact than "no
 network". This module installs a second, independent kernel control: a seccomp-BPF filter
-that denies socket creation and every operation on a socket, before the scientific worker is
-imported. It also denies the syscalls that would let a worker observe or signal the
+that denies socket creation and the socket data paths, before the scientific worker is
+imported. An inherited socket descriptor is prevented by the supervisor's close_fds and
+verified through /proc; the filter also blocks sendfile/splice/tee/vmsplice/copy_file_range
+so a future inherited socket cannot be used through those paths. The policy denies the
+syscalls that would let a worker observe or signal the
 supervisor, create a new namespace or mount, use io_uring to bypass the socket filter, or
 escape through a pidfd.
 
@@ -80,9 +83,14 @@ BLOCKED_NETWORK_SYSCALLS: Final[dict[int, str]] = {
     53: "socketpair",
     54: "setsockopt",
     55: "getsockopt",
+    40: "sendfile",
+    275: "splice",
+    276: "tee",
+    278: "vmsplice",
     288: "accept4",
     299: "recvmmsg",
     307: "sendmmsg",
+    326: "copy_file_range",
     425: "io_uring_setup",
     426: "io_uring_enter",
     427: "io_uring_register",

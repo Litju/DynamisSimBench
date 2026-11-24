@@ -5,7 +5,9 @@ per-attempt AppContainer profile, launches a suspended worker inside it, assigns
 worker to a bounded Job Object, and verifies the AppContainer token from outside the
 worker. It does not install a production route and is never imported by the supervisor.
 
-The AppContainer token does not carry the interactive user SID or an internet capability.
+The AppContainer token is a lowbox/restricted token with the package SID and no internet
+capability. File access is the intersection of the normal and restricted checks; this is not
+an absence-of-user-SID claim.
 The attempt's runtime, input view and scratch are created inside the profile's own
 filesystem folder and receive explicit DACLs: read/execute for the runtime and input, and
 read/write for scratch. The original workspace and the interactive user profile are not
@@ -475,10 +477,13 @@ def grant_tree(
 
     ``access`` is the worker's rights expression (for example ``(OI)(CI)(RX)``).
     ``user_access`` is the interactive supervisor user's expression. Runtime and input
-    trees use ``(OI)(CI)(RX,DE,DC)``: the same user cannot write their contents during an
-    attempt, but can still delete them for cleanup. The package SID never receives write
-    access to a read-only view, and the two system principals retain full control. The
-    scratch tree gives the user full control because the supervisor must read the receipt.
+    trees use ``(OI)(CI)(RX,DE,DC)``: the worker token cannot write their contents, and the
+    user can delete them for cleanup. The user owns the tree and can still change its DACL,
+    so this is not a same-user immutability claim; the pre/post closures are the detection.
+    The package SID never receives write access to a read-only view. SYSTEM retains full
+    control; the Administrators group is deliberately not granted, so an elevated runner's
+    group membership is not a worker write path. The scratch tree gives the user full
+    control because the supervisor must read the receipt.
     """
     if not path.is_dir():
         raise AppContainerError("an AppContainer grant target is not a directory")
@@ -487,14 +492,17 @@ def grant_tree(
         _system32_tool("icacls.exe"),
         str(path),
         "/inheritance:r",
+        # An AppContainer profile's AC folder carries a package-SID "(CR)(F)" ACE that
+        # /grant:r does not replace. Remove every existing grant ACE for the package SID
+        # first, then add exactly the requested rights.
+        "/remove:g",
+        f"*{sid_string}",
         "/grant:r",
         f"*{sid_string}:{access}",
         "/grant:r",
         f"*{user}:{user_access}",
         "/grant:r",
         "*S-1-5-18:(OI)(CI)(F)",
-        "/grant:r",
-        "*S-1-5-32-544:(OI)(CI)(F)",
     ]
     completed = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
     if completed.returncode != 0:
@@ -761,6 +769,7 @@ class AppContainerProcess:
         attribute_buffer: Any = None
         attribute_initialized = False
         pipes: list[Any] = []
+        wrapped_handles: set[int] = set()
         process_info = _ProcessInformation()
         try:
             security = _SecurityAttributes(ctypes.sizeof(_SecurityAttributes), None, True)
@@ -873,7 +882,11 @@ class AppContainerProcess:
 
             job.assign(_handle_value(process_info.hProcess))
             observation = _token_observation(int(process_info.dwProcessId), profile.sid_string)
-            api.ResumeThread(process_info.hThread)
+            resumed = api.ResumeThread(process_info.hThread)
+            if int(resumed) == 0xFFFFFFFF:
+                raise AppContainerError(
+                    f"ResumeThread failed for the suspended AppContainer worker: {_last_error()}"
+                )
 
             instance = object.__new__(cls)
             instance._job = job
@@ -888,16 +901,19 @@ class AppContainerProcess:
                 "wb",
                 buffering=0,
             )
+            wrapped_handles.add(_handle_value(stdin_write))
             instance.stdout = os.fdopen(
                 _open_osfhandle(_handle_value(stdout_read), os.O_RDONLY),
                 "rb",
                 buffering=0,
             )
+            wrapped_handles.add(_handle_value(stdout_read))
             instance.stderr = os.fdopen(
                 _open_osfhandle(_handle_value(stderr_read), os.O_RDONLY),
                 "rb",
                 buffering=0,
             )
+            wrapped_handles.add(_handle_value(stderr_read))
             return instance
         except BaseException:
             if process_info.hProcess:
@@ -906,6 +922,10 @@ class AppContainerProcess:
                 api.CloseHandle(handle)
             if thread_handle:
                 api.CloseHandle(thread_handle)
+            for read_handle, write_handle in pipes:
+                for handle in (read_handle, write_handle):
+                    if _handle_value(handle) not in wrapped_handles:
+                        api.CloseHandle(handle)
             job.terminate()
             job.close()
             raise

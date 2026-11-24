@@ -82,7 +82,15 @@ _MAX_STDOUT: Final = 1024 * 1024
 _MAX_STDERR: Final = 256 * 1024
 _POLL_SECONDS: Final = 0.02
 _NETWORK_PROBE_NAMES: Final = frozenset(
-    {"network_connect", "network_udp", "network_raw", "network_unix", "inherited_sockets"}
+    {
+        "network_connect",
+        "network_udp",
+        "network_raw",
+        "network_unix",
+        "network_socketpair",
+        "io_uring_setup",
+        "inherited_sockets",
+    }
 )
 
 
@@ -327,6 +335,49 @@ def _read_proc_cgroup(pid: int) -> str | None:
     return None
 
 
+def _environment_policy(scratch: Path) -> tuple[set[str], set[str]]:
+    """Return the allowed and required worker environment names for this launch."""
+    allowed = set(_environment(scratch))
+    allowed.discard("PYTHONHASHSEED")
+    allowed.update({"TEMP", "TMP", "HOME"})
+    if os.name == "nt":
+        allowed.update(
+            {
+                "PATH",
+                "PROCESSOR_ARCHITECTURE",
+                "PROCESSOR_ARCHITEW6432",
+                "PROCESSOR_IDENTIFIER",
+            }
+        )
+    required = {
+        "DYNAMISBENCH_RES555_B2_PROBE",
+        "HOME",
+        "PYTHONDONTWRITEBYTECODE",
+        "PYTHONIOENCODING",
+        "PYTHONNOUSERSITE",
+        "PYTHONUTF8",
+        "TEMP",
+        "TMP",
+        "TZ",
+    }
+    return allowed, required
+
+
+def _capture_worker_ready(ready_path: Path, pid: int | None, external: dict[str, object]) -> None:
+    """Read the worker's ready echo and, on Linux, the supervisor's /proc facts."""
+    if external.get("ready") is not None or not ready_path.is_file():
+        return
+    try:
+        ready = json.loads(ready_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        ready = {"invalid": True}
+    external["ready"] = ready
+    if pid is not None:
+        external["proc"] = _read_proc_status(pid)
+        external["cgroup_path"] = _read_proc_cgroup(pid)
+        external["fds"] = _read_proc_sockets(pid)
+
+
 def _read_proc_sockets(pid: int) -> dict[str, object]:
     """Count inherited socket descriptors from outside the worker."""
     import stat
@@ -370,6 +421,7 @@ def _terminate(
         except Exception:  # noqa: BLE001 - cleanup is best effort at this boundary
             cleaned = False
         return reaped, cleaned
+    cgroup_killed = False
     if cgroup is not None:
         # The cgroup is authoritative: it reaches a setsid() child and a descendant whose
         # direct parent exited, which the session/process group cannot. The process group is
@@ -379,7 +431,7 @@ def _terminate(
                 tree.request_termination()
             except OSError:
                 pass
-        cgroup.kill()
+        cgroup_killed = cgroup.kill()
     elif tree is not None:
         try:
             tree.request_termination()
@@ -398,7 +450,7 @@ def _terminate(
             pass
     reaped = process.poll() is not None
     if cgroup is not None:
-        cleaned = cgroup.wait_empty(5.0)
+        cleaned = cgroup_killed and cgroup.wait_empty(5.0)
     else:
         cleaned = tree.wait_empty(5.0) if tree is not None else False
     return reaped, cleaned
@@ -539,11 +591,22 @@ def run_protected_probe(
         isolation_profile_sha256=isolation.digest(),
     )
     binding_digest = sha256_bytes(canonical_semantic_bytes(binding))
-    parent = (
-        scratch_budget.root
-        if scratch_budget.root is not None
-        else (sandbox_parent if sandbox_parent is not None else runtime.root.parent)
-    )
+    created_parent: Path | None = None
+    if scratch_budget.root is not None:
+        parent = scratch_budget.root
+    elif sandbox_parent is not None:
+        parent = sandbox_parent
+    elif os.name == "nt":
+        # The AppContainer profile's AC folder is writable by the package SID. An attempt
+        # beneath it would let the worker write outside the measured scratch tree with
+        # ``..``. The attempt lives in a supervisor-owned temporary parent instead; the AC
+        # folder is later reduced to read/execute for the package SID.
+        # Resolve the 8.3 temporary path to its exact long NTFS name; the A1 input-view
+        # reader refuses an alias path even though Windows can open it.
+        parent = Path(tempfile.mkdtemp(prefix="res555-b2-attempt-parent-")).resolve()
+        created_parent = parent
+    else:
+        parent = runtime.root.parent
     attempt = parent / f"attempt-{binding.launch_nonce[:16]}"
     inputs = attempt / "inputs"
     scratch = attempt / "scratch"
@@ -581,7 +644,6 @@ def run_protected_probe(
     cgroup_observation: dict[str, object] | None = None
     cgroup_cleaned = False
     scratch_watchdog: ScratchWatchdog | None = None
-    scratch_watchdog_triggered = False
     try:
         for root in forbidden_read_roots:
             sentinels.append(_create_sentinel(root, token, create_root=root in {staging, sealed}))
@@ -590,6 +652,14 @@ def run_protected_probe(
             staging / f"res555-b2-write-{token}.txt",
             sealed / f"res555-b2-write-{token}.txt",
         ]
+        if os.name == "nt":
+            assert profile is not None
+            forbidden_writes.extend(
+                [
+                    attempt.parent / f"res555-b2-parent-{token}.txt",
+                    profile.folder / f"res555-b2-ac-{token}.txt",
+                ]
+            )
         runtime_write = runtime.source_root / "dynamisbench" / f"res555-b2-write-{token}.txt"
         canary = _NetworkCanary()
         try:
@@ -645,9 +715,16 @@ def run_protected_probe(
             if os.name == "nt":
                 from tools.res555_gate_b2.windows import grant_tree
 
-                # The worker is read-only here; the same host user may delete for cleanup
-                # but may not rewrite the measured runtime or materialized input while the
-                # attempt is running. The post-exit closures still detect a deletion race.
+                # The profile's AC folder is created with package-SID full control. Reduce it
+                # to traverse/read before the worker starts, so ``..`` cannot create files
+                # outside the measured attempt. The supervisor user keeps cleanup control;
+                # the runtime/input/attempt trees are then granted explicitly.
+                grant_tree(
+                    profile.folder,
+                    profile.sid_string,
+                    "(OI)(CI)(RX)",
+                    user_access="(OI)(CI)(F)",
+                )
                 grant_tree(
                     runtime.root,
                     profile.sid_string,
@@ -733,9 +810,7 @@ def run_protected_probe(
                     "cgroup": cgroup.observe().as_json(),
                 }
 
-            def _on_scratch_overrun(usage: ScratchUsage) -> None:
-                nonlocal scratch_watchdog_triggered
-                scratch_watchdog_triggered = True
+            def _on_scratch_overrun(_usage: ScratchUsage) -> None:
                 if cgroup is not None:
                     cgroup.kill()
                 try:
@@ -767,21 +842,23 @@ def run_protected_probe(
             deadline = time.monotonic() + isolation.wall_time_seconds
             ready_path = scratch / "sandbox-ready.json"
             while process.poll() is None:
-                if external.get("ready") is None and ready_path.is_file():
-                    try:
-                        ready = json.loads(ready_path.read_text(encoding="utf-8"))
-                    except (OSError, json.JSONDecodeError):
-                        ready = {"invalid": True}
-                    external["ready"] = ready
-                    if posix_process is not None:
-                        external["proc"] = _read_proc_status(posix_process.pid)
-                        external["cgroup_path"] = _read_proc_cgroup(posix_process.pid)
-                        external["fds"] = _read_proc_sockets(posix_process.pid)
+                _capture_worker_ready(
+                    ready_path,
+                    None if posix_process is None else posix_process.pid,
+                    external,
+                )
                 if stdout_reader.overflow.is_set():
                     break
                 if time.monotonic() >= deadline:
                     break
                 time.sleep(_POLL_SECONDS)
+            # A fast worker can write the ready marker and exit between poll ticks. Capture
+            # the /proc facts before reaping it; this is the last point at which they exist.
+            _capture_worker_ready(
+                ready_path,
+                None if posix_process is None else posix_process.pid,
+                external,
+            )
             reaped, cleaned = _terminate(
                 process,
                 tree,
@@ -793,14 +870,11 @@ def run_protected_probe(
             stdin_writer.join(5.0)
             stdout_reader.join(5.0)
             stderr_reader.join(5.0)
-            if posix_process is not None and external.get("ready") is None and ready_path.is_file():
-                try:
-                    external["ready"] = json.loads(ready_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    external["ready"] = {"invalid": True}
-                external["proc"] = _read_proc_status(posix_process.pid)
-                external["cgroup_path"] = _read_proc_cgroup(posix_process.pid)
-                external["fds"] = _read_proc_sockets(posix_process.pid)
+            _capture_worker_ready(
+                ready_path,
+                None if posix_process is None else posix_process.pid,
+                external,
+            )
             stdout_bytes = bytes(stdout_reader.buffer)
             stderr_bytes = bytes(stderr_reader.buffer)
             exit_code = process.poll()
@@ -995,6 +1069,8 @@ def run_protected_probe(
                 udp_probe = network_probes.get("network_udp")
                 raw_probe = network_probes.get("network_raw")
                 unix_probe = network_probes.get("network_unix")
+                socketpair_probe = network_probes.get("network_socketpair")
+                io_uring_probe = network_probes.get("io_uring_setup")
                 inherited_probe = network_probes.get("inherited_sockets")
                 checks.append(
                     _check(
@@ -1012,13 +1088,17 @@ def run_protected_probe(
                 checks.append(
                     _check(
                         "network_udp_denied",
-                        canary.udp_received == 0,
+                        canary.udp_received == 0
+                        and (
+                            os.name == "nt"
+                            or (udp_probe is not None and udp_probe.observed == "denied")
+                        ),
                         {
                             "canary_datagrams": canary.udp_received,
                             "worker": None if udp_probe is None else udp_probe.observed,
                         },
-                        "zero localhost datagrams; the worker's sendto result alone is not "
-                        "delivery evidence",
+                        "zero localhost datagrams and, on Linux, a denied UDP socket; the "
+                        "Windows sendto result alone is not delivery evidence",
                     )
                 )
                 checks.append(
@@ -1029,20 +1109,44 @@ def run_protected_probe(
                         "denied",
                     )
                 )
+                unix_unavailable = bool(
+                    unix_probe is not None
+                    and unix_probe.observed == "error"
+                    and "unavailable" in unix_probe.detail
+                )
                 checks.append(
                     _check(
                         "network_unix_denied",
                         unix_probe is not None
-                        and unix_probe.observed == "denied"
+                        and (unix_probe.observed == "denied" or unix_unavailable)
                         and canary.unix_accepted == 0,
                         {
                             "canary_connections": canary.unix_accepted,
                             "worker": None if unix_probe is None else unix_probe.observed,
+                            "worker_detail": None if unix_probe is None else unix_probe.detail,
                         },
-                        "zero Unix-domain connections and a denied socket",
+                        "zero Unix-domain connections and a denied socket (or an unavailable "
+                        "AF_UNIX family, which is not a communication path)",
+                    )
+                )
+                checks.append(
+                    _check(
+                        "network_socketpair_denied",
+                        os.name == "nt"
+                        or (socketpair_probe is not None and socketpair_probe.observed == "denied"),
+                        None if socketpair_probe is None else socketpair_probe.observed,
+                        "denied on Linux; local IPC remains on Windows",
                     )
                 )
                 if os.name != "nt":
+                    checks.append(
+                        _check(
+                            "seccomp_io_uring_denied",
+                            io_uring_probe is not None and io_uring_probe.observed == "denied",
+                            None if io_uring_probe is None else io_uring_probe.observed,
+                            "io_uring_setup denied by the seccomp policy",
+                        )
+                    )
                     checks.append(
                         _check(
                             "inherited_sockets_absent",
@@ -1173,14 +1277,6 @@ def run_protected_probe(
                     scratch_budget.detail,
                 )
             )
-            checks.append(
-                _check(
-                    "scratch_backend_matches_profile",
-                    isolation.scratch_limit_enforcement == scratch_budget.enforcement,
-                    isolation.scratch_limit_enforcement,
-                    scratch_budget.enforcement,
-                )
-            )
             if scratch_watchdog is not None:
                 checks.append(
                     _check(
@@ -1245,17 +1341,25 @@ def run_protected_probe(
                     seccomp_filters = 0
                 checks.append(
                     _check(
-                        "external_landlock",
-                        isinstance(ready, dict)
-                        and ready.get("mechanism") == "linux-landlock"
-                        and abi >= 4
-                        and proc.get("no_new_privs") == "1"
+                        "external_proc_facts",
+                        proc.get("no_new_privs") == "1"
                         and str(proc.get("cap_eff", "")).lower() == "0000000000000000"
                         and proc.get("seccomp") == "2"
                         and seccomp_filters >= 1,
-                        {"ready": ready, "proc": proc},
-                        "Landlock ABI 4+, NoNewPrivs=1, zero effective capabilities and "
-                        "seccomp filter mode with at least one filter",
+                        proc,
+                        "supervisor-read /proc facts: NoNewPrivs=1, zero effective "
+                        "capabilities and seccomp filter mode with at least one filter",
+                    )
+                )
+                checks.append(
+                    _check(
+                        "worker_landlock_echo",
+                        isinstance(ready, dict)
+                        and ready.get("mechanism") == "linux-landlock"
+                        and abi >= 4,
+                        ready,
+                        "worker-authored configuration echo (corroboration, not independent "
+                        "proof); the ABI/mechanism claim is not supervisor-read",
                     )
                 )
                 external_cgroup_path = external.get("cgroup_path")
@@ -1286,12 +1390,26 @@ def run_protected_probe(
                     )
                 )
             ready = external.get("ready")
+            allowed_environment, required_environment = _environment_policy(scratch)
+            if isinstance(ready, dict) and isinstance(ready.get("environment_keys"), list):
+                observed_keys = {str(name) for name in ready["environment_keys"]}
+            else:
+                observed_keys = set()
+            unexpected_environment = sorted(observed_keys - allowed_environment)
+            missing_environment = sorted(required_environment - observed_keys)
             checks.append(
                 _check(
                     "environment_sanitized",
-                    isinstance(ready, dict) and ready.get("environment_sanitized") is True,
-                    ready,
-                    "the bootstrap replaced the inherited environment before importing",
+                    isinstance(ready, dict)
+                    and ready.get("environment_sanitized") is True
+                    and not unexpected_environment
+                    and not missing_environment,
+                    {
+                        "unexpected": unexpected_environment,
+                        "missing": missing_environment,
+                    },
+                    "the worker echo contains exactly the launch-policy names (the echo is "
+                    "not independent proof)",
                 )
             )
             checks.append(
@@ -1403,6 +1521,8 @@ def run_protected_probe(
         if windows_process is not None:
             windows_process.close()
         shutil.rmtree(attempt, ignore_errors=True)
+        if created_parent is not None:
+            shutil.rmtree(created_parent, ignore_errors=True)
         if os.name == "nt":
             from tools.res555_gate_b2.windows import restore_user_control
 

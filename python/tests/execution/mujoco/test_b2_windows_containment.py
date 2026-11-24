@@ -7,16 +7,15 @@ import ctypes
 import json
 import os
 import shutil
-import sys
 import tempfile
 import time
-import uuid
 from collections.abc import Iterator
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from tools.res555_gate_b2.runtime import ProtectedRuntime
 from tools.res555_gate_b2.scratch import ScratchWatchdog, measure_scratch
 from tools.res555_gate_b2.windows import (
     AppContainerProcess,
@@ -63,34 +62,48 @@ def _kernel32():
 
 @contextlib.contextmanager
 def _appcontainer(
-    script: str, arguments: tuple[str, ...] = ()
+    b2_runtime: tuple[AppContainerProfile, ProtectedRuntime],
+    script: str,
+    arguments: tuple[str, ...] = (),
 ) -> Iterator[tuple[AppContainerProfile, Path, AppContainerProcess]]:
+    """Run one script from the measured snapshot, never by re-DACLing the host Python.
+
+    The session fixture owns the AppContainer profile and the copied runtime. This helper
+    grants only those snapshot trees and a disposable scratch directory; it never changes
+    the ACL of ``sys.base_prefix`` or the developer's virtual environment.
+    """
+    profile, runtime = b2_runtime
     root = Path(tempfile.mkdtemp(prefix="res555-win-contain-"))
     scratch = root / "scratch"
     scratch.mkdir()
     (scratch / "worker.py").write_text(script, encoding="utf-8")
-    profile = AppContainerProfile.create(f"DynamisBench.RES555.Contain.{uuid.uuid4().hex[:12]}")
+    grant_tree(
+        profile.folder,
+        profile.sid_string,
+        "(OI)(CI)(RX)",
+        user_access="(OI)(CI)(F)",
+    )
+    grant_tree(
+        runtime.root,
+        profile.sid_string,
+        "(OI)(CI)(RX)",
+        user_access="(OI)(CI)(RX,DE,DC)",
+    )
+    grant_tree(scratch, profile.sid_string, "(OI)(CI)(F)")
+    process = AppContainerProcess.launch(
+        profile=profile,
+        application=runtime.interpreter,
+        arguments=("-I", str(scratch / "worker.py"), *arguments),
+        working_directory=scratch,
+        environment=None,
+        memory_bytes=512 * 1024 * 1024,
+        cpu_seconds=30,
+        max_processes=8,
+    )
     try:
-        python = Path(sys.executable)
-        grant_tree(Path(sys.base_prefix), profile.sid_string, "(OI)(CI)(RX)")
-        grant_tree(python.parent.parent, profile.sid_string, "(OI)(CI)(RX)")
-        grant_tree(scratch, profile.sid_string, "(OI)(CI)(F)")
-        process = AppContainerProcess.launch(
-            profile=profile,
-            application=python,
-            arguments=("-I", str(scratch / "worker.py"), *arguments),
-            working_directory=scratch,
-            environment=None,
-            memory_bytes=512 * 1024 * 1024,
-            cpu_seconds=30,
-            max_processes=8,
-        )
-        try:
-            yield profile, scratch, process
-        finally:
-            process.close()
+        yield profile, scratch, process
     finally:
-        profile.delete()
+        process.close()
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -121,7 +134,10 @@ def _create_inheritable_file(path: Path) -> tuple[int, str]:
     return int(handle.value) if hasattr(handle, "value") else int(handle), str(path)
 
 
-def test_only_the_stdio_pipe_handles_are_inherited(tmp_path: Path) -> None:
+def test_only_the_stdio_pipe_handles_are_inherited(
+    tmp_path: Path,
+    b2_runtime: tuple[AppContainerProfile, ProtectedRuntime],
+) -> None:
     secret = tmp_path / "res555-handle-secret.txt"
     secret.write_text("RES555-HANDLE-SECRET", encoding="utf-8")
     api = _win32()
@@ -147,7 +163,11 @@ else:
                       "error": ctypes.get_last_error()}))
 """
     try:
-        with _appcontainer(script, (str(handle_value),)) as (_profile, _scratch, process):
+        with _appcontainer(b2_runtime, script, (str(handle_value),)) as (
+            _profile,
+            _scratch,
+            process,
+        ):
             stdout = process.stdout.read()
             stderr = process.stderr.read()
             process.wait(10.0)
@@ -163,7 +183,9 @@ else:
         api.CloseHandle(ctypes.c_void_p(handle_value))
 
 
-def test_a_descendant_that_outlives_its_direct_parent_stays_in_the_job() -> None:
+def test_a_descendant_that_outlives_its_direct_parent_stays_in_the_job(
+    b2_runtime: tuple[AppContainerProfile, ProtectedRuntime],
+) -> None:
     script = r"""
 import subprocess, sys
 child = subprocess.Popen(
@@ -175,7 +197,7 @@ child.stdout.close()
 child.stderr.close()
 print(child.pid, flush=True)
 """
-    with _appcontainer(script) as (_profile, _scratch, process):
+    with _appcontainer(b2_runtime, script) as (_profile, _scratch, process):
         stdout = process.stdout.read()
         stderr = process.stderr.read()
         process.wait(10.0)
@@ -192,79 +214,41 @@ print(child.pid, flush=True)
         assert int(process.job_accounting()["active_processes"]) == 0
 
 
-def test_cancellation_terminates_the_job_and_the_direct_worker() -> None:
+def test_cancellation_terminates_the_job_and_the_direct_worker(
+    b2_runtime: tuple[AppContainerProfile, ProtectedRuntime],
+) -> None:
     script = "import time; time.sleep(30)"
-    with _appcontainer(script) as (_profile, _scratch, process):
+    with _appcontainer(b2_runtime, script) as (_profile, _scratch, process):
         time.sleep(0.2)
         process.kill()
         process.wait(10.0)
         assert int(process.job_accounting()["active_processes"]) == 0
 
 
-def test_repeated_launches_leave_no_active_processes() -> None:
+def test_repeated_launches_leave_no_active_processes(
+    b2_runtime: tuple[AppContainerProfile, ProtectedRuntime],
+) -> None:
     script = "import time; time.sleep(30)"
-    root = Path(tempfile.mkdtemp(prefix="res555-win-repeat-"))
-    scratch = root / "scratch"
-    scratch.mkdir()
-    (scratch / "worker.py").write_text(script, encoding="utf-8")
-    profile = AppContainerProfile.create(f"DynamisBench.RES555.Repeat.{uuid.uuid4().hex[:12]}")
-    try:
-        python = Path(sys.executable)
-        grant_tree(Path(sys.base_prefix), profile.sid_string, "(OI)(CI)(RX)")
-        grant_tree(python.parent.parent, profile.sid_string, "(OI)(CI)(RX)")
-        grant_tree(scratch, profile.sid_string, "(OI)(CI)(F)")
-        for _ in range(3):
-            process = AppContainerProcess.launch(
-                profile=profile,
-                application=python,
-                arguments=("-I", str(scratch / "worker.py")),
-                working_directory=scratch,
-                environment=None,
-                memory_bytes=512 * 1024 * 1024,
-                cpu_seconds=30,
-                max_processes=8,
-            )
-            try:
-                time.sleep(0.1)
-                process.kill()
-                process.wait(10.0)
-                assert int(process.job_accounting()["active_processes"]) == 0
-            finally:
-                process.close()
-    finally:
-        profile.delete()
-        shutil.rmtree(root, ignore_errors=True)
+    for _ in range(3):
+        with _appcontainer(b2_runtime, script) as (_profile, _scratch, process):
+            time.sleep(0.1)
+            process.kill()
+            process.wait(10.0)
+            assert int(process.job_accounting()["active_processes"]) == 0
 
 
-def test_the_sampled_watchdog_kills_an_over_budget_writer() -> None:
+def test_the_sampled_watchdog_kills_an_over_budget_writer(
+    b2_runtime: tuple[AppContainerProfile, ProtectedRuntime],
+) -> None:
     script = r"""
-import os, sys
-path = os.path.join(sys.argv[1], "grow.bin")
+import os
+path = os.path.join(os.getcwd(), "grow.bin")
 with open(path, "wb") as handle:
     while True:
         handle.write(b"x" * (1024 * 1024))
         handle.flush()
 """
-    root = Path(tempfile.mkdtemp(prefix="res555-win-watchdog-"))
-    scratch = root / "scratch"
-    scratch.mkdir()
-    (scratch / "worker.py").write_text(script, encoding="utf-8")
-    profile = AppContainerProfile.create(f"DynamisBench.RES555.Watch.{uuid.uuid4().hex[:12]}")
-    try:
-        python = Path(sys.executable)
-        grant_tree(Path(sys.base_prefix), profile.sid_string, "(OI)(CI)(RX)")
-        grant_tree(python.parent.parent, profile.sid_string, "(OI)(CI)(RX)")
-        grant_tree(scratch, profile.sid_string, "(OI)(CI)(F)")
-        process = AppContainerProcess.launch(
-            profile=profile,
-            application=python,
-            arguments=("-I", str(scratch / "worker.py"), str(scratch)),
-            working_directory=scratch,
-            environment=None,
-            memory_bytes=512 * 1024 * 1024,
-            cpu_seconds=30,
-            max_processes=8,
-        )
+    with _appcontainer(b2_runtime, script) as (_profile, scratch, process):
         watchdog = ScratchWatchdog(
             root=scratch,
             limit_bytes=1024 * 1024,
@@ -286,10 +270,6 @@ with open(path, "wb") as handle:
             assert int(process.job_accounting()["active_processes"]) == 0
         finally:
             watchdog.stop()
-            process.close()
         # The watchdog is sampled, not a hard quota: the point is that it reacted and the
         # job is empty, not that the worker wrote exactly the configured number of bytes.
         assert measure_scratch(scratch).bytes >= 1024 * 1024
-    finally:
-        profile.delete()
-        shutil.rmtree(root, ignore_errors=True)

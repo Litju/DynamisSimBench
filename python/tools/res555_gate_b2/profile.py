@@ -62,9 +62,10 @@ def _window_network_scope() -> str:
     return (
         "AppContainer without an internetClient/privateNetwork capability: outbound TCP "
         "connects time out and no connection reaches a localhost canary; UDP sendto returns "
-        "success but no datagram reaches a localhost canary; raw send is denied; AF_UNIX is "
-        "unavailable in the qualified interpreter. socketpair remains available as local "
-        "in-process IPC, so this is 'restricted', not a universal no-socket claim."
+        "success but no datagram reaches a localhost canary; raw send is denied; the "
+        "Unix-domain attempt is denied and no connection reaches the canary. socketpair "
+        "remains available as local in-process IPC, so this is 'restricted', not a universal "
+        "no-socket claim."
     )
 
 
@@ -72,9 +73,11 @@ def _linux_network_scope() -> str:
     return (
         "Landlock ABI >= 4 denies TCP bind/connect; seccomp additionally denies socket, "
         "socketpair, connect, bind, listen, accept, sendto/sendmsg/sendmmsg, "
-        "recvfrom/recvmsg/recvmmsg, shutdown, getsockname/getpeername, getsockopt/setsockopt "
-        "and io_uring. No IP (TCP or UDP), raw or Unix-domain socket communication remains; "
-        "stdio pipes and Landlock-bounded file access are the remaining channels."
+        "recvfrom/recvmsg/recvmmsg, shutdown, getsockname/getpeername, getsockopt/setsockopt, "
+        "sendfile/splice/tee/vmsplice/copy_file_range and io_uring. No IP (TCP or UDP), raw or "
+        "Unix-domain socket communication remains; inherited sockets are prevented by "
+        "close_fds and verified through /proc. stdio pipes and Landlock-bounded file access "
+        "are the remaining channels."
     )
 
 

@@ -52,7 +52,7 @@ __all__ = [
 _POLL_SECONDS: Final = 0.02
 _DEFAULT_KILL_GRACE_SECONDS: Final = 5.0
 _DEFAULT_CONTROLLERS: Final = ("pids", "memory", "cpu")
-_REQUIRED_CONTROLLERS: Final = frozenset({"pids"})
+_REQUIRED_CONTROLLERS: Final = frozenset({"pids", "memory"})
 _CGROUP2_FSTYPE: Final = "cgroup2"
 _ATTACH_CODE: Final = (
     "import os,sys\n"
@@ -255,9 +255,11 @@ def _is_delegated(path: Path) -> bool:
             return False
         if not (path / "cgroup.procs").is_file() or not (path / "cgroup.kill").is_file():
             return False
+        if not (path / "pids.peak").is_file():
+            return False
         if _read(path / "cgroup.type") != "domain":
             return False
-        if "pids" not in _controllers(path):
+        if not _REQUIRED_CONTROLLERS <= _controllers(path):
             return False
         if not os.access(path, os.W_OK | os.X_OK):
             return False
@@ -415,18 +417,21 @@ class CgroupV2:
             ("memory.oom.group", "1"),
         ):
             target = self.path / name
-            if target.exists():
-                _write(target, value)
+            if not target.exists():
+                raise CgroupUnavailableError(
+                    f"the delegated cgroup does not expose the required {name!r} control"
+                )
+            _write(target, value)
         if self._limits.cpu_max is not None:
             cpu_max = self.path / "cpu.max"
             if cpu_max.exists():
                 _write(cpu_max, self._limits.cpu_max)
         if _read(self.path / "pids.max") != str(self._limits.pids_max):
             raise CgroupError("the cgroup did not retain the requested pids limit")
-        if (self.path / "memory.max").exists() and _read(self.path / "memory.max") != str(
-            self._limits.memory_max_bytes
-        ):
+        if _read(self.path / "memory.max") != str(self._limits.memory_max_bytes):
             raise CgroupError("the cgroup did not retain the requested memory limit")
+        if _read(self.path / "memory.swap.max") != str(self._limits.swap_max_bytes):
+            raise CgroupError("the cgroup did not retain the requested swap limit")
 
     def _cleanup_failed_setup(self) -> None:
         try:

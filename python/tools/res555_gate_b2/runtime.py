@@ -471,6 +471,15 @@ def prepare_runtime(
             model_asset_relative=_MODEL_ASSET,
         )
     elif platform_tag == "linux-x86-64":
+        if environment.base_prefix in {Path("/"), Path("/usr"), Path("/usr/local")}:
+            raise ProtectedRuntimeError(
+                "the Linux probe requires a dedicated Python base, not a system prefix; "
+                "granting /usr or /usr/local would make every system tool executable"
+            )
+        if environment.resolved_executable.parent == Path("/usr/bin"):
+            raise ProtectedRuntimeError(
+                "the Linux probe requires a dedicated interpreter, not a /usr/bin executable"
+            )
         site_copy = runtime_root / "site-packages"
         source_copy = runtime_root / "src"
         runtime_root.mkdir(parents=True, exist_ok=True)

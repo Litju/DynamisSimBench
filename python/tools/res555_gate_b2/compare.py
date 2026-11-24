@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
+from tools.res555_gate_b2.reference import load_reference_observation
+
 from dynamisbench.adapters.mujoco import reference
 from dynamisbench.adapters.mujoco._b2_probe_common import SupervisorObservation
 
@@ -49,6 +51,18 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
     linux_model = linux.receipt.model if linux.receipt is not None else None
     windows_physics = windows.receipt.physics if windows.receipt is not None else None
     linux_physics = linux.receipt.physics if linux.receipt is not None else None
+    pinned = load_reference_observation()
+    pinned_trajectory = str(pinned["trajectory_sha256"])
+    pinned_model = str(pinned["model_sha256"])
+
+    def qualified(observation: SupervisorObservation) -> bool:
+        value = observation.numerical_reference
+        return bool(
+            value is not None
+            and value.get("matches") is True
+            and value.get("expected_trajectory_sha256") == pinned_trajectory
+            and value.get("observed_trajectory_sha256") == pinned_trajectory
+        )
 
     checks = [
         _check(
@@ -88,6 +102,18 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
             reference.MODEL_SHA256,
         ),
         _check(
+            "model_pinned",
+            windows_model is not None
+            and linux_model is not None
+            and windows_model.sha256 == pinned_model
+            and linux_model.sha256 == pinned_model,
+            [
+                None if windows_model is None else windows_model.sha256,
+                None if linux_model is None else linux_model.sha256,
+            ],
+            pinned_model,
+        ),
+        _check(
             "model_from_input_view",
             windows_model is not None
             and linux_model is not None
@@ -114,29 +140,27 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
         ),
         _check(
             "windows_qualified_trajectory",
-            windows.numerical_reference is not None
-            and windows.numerical_reference.get("matches") is True,
+            qualified(windows),
             None if windows.numerical_reference is None else windows.numerical_reference,
-            "the supervisor's comparison with the qualified reference",
+            "the supervisor's comparison with the committed qualified reference",
         ),
         _check(
             "linux_qualified_trajectory",
-            linux.numerical_reference is not None
-            and linux.numerical_reference.get("matches") is True,
+            qualified(linux),
             None if linux.numerical_reference is None else linux.numerical_reference,
-            "the supervisor's comparison with the qualified reference",
+            "the supervisor's comparison with the committed qualified reference",
         ),
         _check(
             "steps",
             windows_physics is not None
             and linux_physics is not None
-            and windows_physics.steps == reference.STEPS
-            and linux_physics.steps == reference.STEPS,
+            and windows_physics.steps == pinned["steps"]
+            and linux_physics.steps == pinned["steps"],
             [
                 None if windows_physics is None else windows_physics.steps,
                 None if linux_physics is None else linux_physics.steps,
             ],
-            reference.STEPS,
+            pinned["steps"],
         ),
         _check(
             "runtime_matches",
@@ -154,8 +178,8 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
         _check(
             "linux_landlock",
             linux.profile.mechanism == "linux-landlock"
-            and linux_checks.get("external_landlock", False),
-            [linux.profile.mechanism, linux_checks.get("external_landlock")],
+            and linux_checks.get("external_proc_facts", False),
+            [linux.profile.mechanism, linux_checks.get("external_proc_facts")],
             ["linux-landlock", True],
         ),
         _check(
@@ -163,14 +187,18 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
             linux.profile.network_mechanism == "linux-landlock-tcp+seccomp"
             and linux_checks.get("network_udp_denied", False)
             and linux_checks.get("network_unix_denied", False)
-            and linux_checks.get("network_raw_denied", False),
+            and linux_checks.get("network_raw_denied", False)
+            and linux_checks.get("network_socketpair_denied", False)
+            and linux_checks.get("seccomp_io_uring_denied", False),
             [
                 linux.profile.network_mechanism,
                 linux_checks.get("network_udp_denied"),
                 linux_checks.get("network_unix_denied"),
                 linux_checks.get("network_raw_denied"),
+                linux_checks.get("network_socketpair_denied"),
+                linux_checks.get("seccomp_io_uring_denied"),
             ],
-            ["linux-landlock-tcp+seccomp", True, True, True],
+            ["linux-landlock-tcp+seccomp", True, True, True, True, True],
         ),
         _check(
             "linux_cgroup",
@@ -189,26 +217,17 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
             ["linux-cgroup-v2-pids", "tasks-and-threads", True, True, True],
         ),
         _check(
-            "windows_job_limit",
-            windows.profile.process_limit_mechanism == "windows-job-object-active-process"
-            and windows.profile.max_processes == 8,
-            [
-                windows.profile.process_limit_mechanism,
-                windows.profile.max_processes,
-            ],
-            ["windows-job-object-active-process", 8],
+            "windows_scratch_bounded",
+            windows.profile.scratch_limit_enforcement
+            in {"dedicated-filesystem", "sampled-watchdog"},
+            windows.profile.scratch_limit_enforcement,
+            "a dedicated filesystem or a sampled watchdog, never post-exit only",
         ),
         _check(
-            "scratch_backends_declared",
-            windows.profile.scratch_limit_enforcement
-            in {"dedicated-filesystem", "sampled-watchdog", "post-exit-acceptance-bound"}
-            and linux.profile.scratch_limit_enforcement
-            in {"dedicated-filesystem", "sampled-watchdog", "post-exit-acceptance-bound"},
-            [
-                windows.profile.scratch_limit_enforcement,
-                linux.profile.scratch_limit_enforcement,
-            ],
-            "an explicitly named scratch mechanism on both platforms",
+            "linux_scratch_dedicated",
+            linux.profile.scratch_limit_enforcement == "dedicated-filesystem",
+            linux.profile.scratch_limit_enforcement,
+            "the host-provisioned dedicated 64 MiB filesystem used by the qualified run",
         ),
         _check(
             "input_view_stable",

@@ -25,9 +25,12 @@ Native extraction, sealing and a production materialized-worker route remain una
    - **Windows:** a per-attempt AppContainer profile with a suspended `CreateProcessW`,
      `SECURITY_CAPABILITIES`, a bounded Job Object, an explicit
      `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` containing only the three stdio pipes, and
-     explicit DACLs. The worker's runtime/input/attempt trees are `RX`; during the attempt
-     the interactive user has only `RX,DE,DC` on them, so it can delete but not rewrite the
-     measured bytes. The supervisor reads the worker token from outside.
+     explicit DACLs. The worker's runtime/input/attempt trees are `RX`; the profile's AC
+     folder is reduced to `RX` for the package SID so `..` cannot create files outside the
+     measured attempt. During the attempt the interactive user has `RX,DE,DC` on those
+     trees, so the **worker token** cannot rewrite the measured bytes. The user owns the
+     tree and can change its DACL, so this is not a same-user immutability barrier; the
+     post-exit closures detect a change. The supervisor reads the worker token from outside.
    - **Linux:** the installed venv interpreter with a fixed bootstrap that applies
      `PR_SET_NO_NEW_PRIVS`, zero capabilities, rlimits, an irreversible Landlock ABI >= 4
      filesystem allowlist and TCP deny, and then a seccomp-BPF policy that denies socket
@@ -107,19 +110,22 @@ CI sets it and treats an unavailable mechanism as a failure. There is no A1 fall
 - **Windows network is restricted, not universal no-socket.** AppContainer without an
   internet capability drops outbound TCP (the localhost canary receives no connection) and
   UDP (the `sendto` call can return success but no datagram reaches the canary); raw send is
-  denied and AF_UNIX is unavailable in the qualified interpreter. `socketpair` remains
-  available as local in-process IPC, so the profile says `restricted`, not `denied`.
+  denied and the Unix-domain attempt is denied with no connection reaching the canary.
+  `socketpair` remains available as local in-process IPC, so the profile says `restricted`,
+  not `denied`.
 - **Linux network is denied through two controls, not one.** Landlock ABI 4 denies TCP
   bind/connect; seccomp denies the socket families and data paths Landlock does not cover,
   plus `io_uring`, so no IP, raw or Unix-domain socket communication remains. The kernel
   facts are read from `/proc` by the supervisor; the worker receipt is only corroboration.
 - **Same-user external modification is not universally prevented.** On Linux the worker runs
   as the same UID; a process outside the sandbox can still write a runtime or input file
-  between measurements. The supervisor re-measures immediately before launch and after exit
-  and refuses a mismatch, but that is detection, not an immutable store. On Windows the
-  attempt DACL closes content writes during execution and allows deletion; deletion is
-  detected by the post-exit closure. A read-only volume or a different principal remains the
-  stronger production answer.
+  between measurements, including between the worker's own source measurement and the
+  import/execution of those bytes. The supervisor re-measures before process creation and
+  after exit, and the worker measures again at start, but that is detection, not an immutable
+  store. On Windows the attempt DACL stops the worker token from rewriting and the AC
+  folder from package-SID writes, but a same-user owner can change the DACL and rewrite;
+  deletion is also possible. Both are detected by the post-exit closure, not prevented. A
+  read-only volume or a different principal remains the stronger production answer.
 - **The MuJoCo/GLFW import launches a short-lived helper Python process.** Under the
   Linux Landlock domain that helper cannot read the worker venv's `pyvenv.cfg`, so it exits
   with a bounded stderr message while the headless reference worker continues. The cgroup

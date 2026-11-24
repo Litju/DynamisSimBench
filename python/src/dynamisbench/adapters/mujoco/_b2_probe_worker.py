@@ -274,7 +274,7 @@ def _probe_unix(path: str | None):
         return ProbeObservation(
             name="network_unix",
             expectation="denied",
-            observed="denied",
+            observed="error",
             detail="AF_UNIX is unavailable in this interpreter",
         )
     try:
@@ -302,6 +302,79 @@ def _probe_unix(path: str | None):
         expectation="denied",
         observed="allowed",
         detail="Unix-domain connect succeeded",
+    )
+
+
+def _probe_socketpair():
+    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+
+    try:
+        left, right = socket.socketpair()
+        left.close()
+        right.close()
+    except PermissionError:
+        return ProbeObservation(
+            name="network_socketpair",
+            expectation="denied",
+            observed="denied",
+            detail="PermissionError",
+        )
+    except OSError as error:
+        return ProbeObservation(
+            name="network_socketpair",
+            expectation="denied",
+            observed="denied",
+            detail=type(error).__name__,
+        )
+    return ProbeObservation(
+        name="network_socketpair",
+        expectation="denied",
+        observed="allowed",
+        detail="socketpair succeeded",
+    )
+
+
+def _probe_io_uring():
+    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+
+    if os.name == "nt":
+        return ProbeObservation(
+            name="io_uring_setup",
+            expectation="denied",
+            observed="error",
+            detail="io_uring is not applicable on Windows",
+        )
+    import ctypes
+
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        result = int(libc.syscall(425, 0, 0))
+    except BaseException as error:  # noqa: BLE001 - a probe records a bounded observation
+        return ProbeObservation(
+            name="io_uring_setup",
+            expectation="denied",
+            observed="error",
+            detail=type(error).__name__,
+        )
+    if result < 0 and ctypes.get_errno() == 1:  # EPERM: the seccomp policy denied it
+        return ProbeObservation(
+            name="io_uring_setup",
+            expectation="denied",
+            observed="denied",
+            detail="EPERM",
+        )
+    if result < 0:
+        return ProbeObservation(
+            name="io_uring_setup",
+            expectation="denied",
+            observed="error",
+            detail=f"the syscall was not denied by seccomp (errno {ctypes.get_errno()})",
+        )
+    return ProbeObservation(
+        name="io_uring_setup",
+        expectation="denied",
+        observed="allowed",
+        detail="io_uring_setup returned a descriptor",
     )
 
 
@@ -385,6 +458,8 @@ def _probes(config: dict[str, Any], targets, inputs_root: Path):
         _probe_udp(targets.network_udp_port),
         _probe_raw(),
         _probe_unix(targets.network_unix_path),
+        _probe_socketpair(),
+        _probe_io_uring(),
         _probe_inherited_sockets(),
         _probe_write(targets.runtime_write, "runtime_write"),
     ]
@@ -463,6 +538,8 @@ def _run_materialized(
     request,
     view,
     identity,
+    *,
+    package_asset_denied: bool,
 ):
     from dynamisbench.adapters.mujoco import reference
     from dynamisbench.adapters.mujoco._b2_probe_common import ProbePolicyError
@@ -538,7 +615,7 @@ def _run_materialized(
         size_bytes=view.asset_size_bytes,
         sha256=view.asset_sha256,
         package_asset_present=package_path.exists(),
-        package_asset_probe="denied",
+        package_asset_probe="denied" if package_asset_denied else "allowed",
         compiled={
             "nq": int(model.nq),
             "nv": int(model.nv),
@@ -613,7 +690,17 @@ def _run(config: dict[str, Any], request):
     # A successful Windows sendto is not delivery evidence; the supervisor's UDP canary is.
     # The Windows descriptor table is likewise checked by the supervisor's handle list, not
     # by a POSIX /proc walk. Those two observations are recorded but do not gate the worker.
-    informational = {"network_udp", "inherited_sockets"} if os.name == "nt" else set()
+    informational = (
+        {
+            "network_udp",
+            "network_unix",
+            "network_socketpair",
+            "io_uring_setup",
+            "inherited_sockets",
+        }
+        if os.name == "nt"
+        else set()
+    )
     failed = [
         probe.name for probe in probes if not probe.passed and probe.name not in informational
     ]
@@ -623,7 +710,14 @@ def _run(config: dict[str, Any], request):
     mode = config["mode"]
     if mode == "materialized-mujoco":
         model, physics_observation, source_manifest = _run_materialized(
-            config, request, view, identity
+            config,
+            request,
+            view,
+            identity,
+            package_asset_denied=any(
+                probe.name == "package_model_asset" and probe.observed == "denied"
+                for probe in probes
+            ),
         )
         engine_imported = "mujoco" in sys.modules
     elif mode == "verify-only":

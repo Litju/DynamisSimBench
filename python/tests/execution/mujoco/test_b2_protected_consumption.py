@@ -19,6 +19,7 @@ from tools.res555_gate_b2.launch import (
     run_protected_probe,
 )
 from tools.res555_gate_b2.profile import build_profile
+from tools.res555_gate_b2.reference import load_reference_observation
 from tools.res555_gate_b2.runtime import ProtectedRuntime
 
 from dynamisbench.adapters.mujoco import reference
@@ -30,6 +31,9 @@ from tests.execution.mujoco.support import (
     ExecutionFixture,
     worker_manifest,
 )
+
+_REFERENCE = load_reference_observation()
+_REFERENCE_TRAJECTORY = str(_REFERENCE["trajectory_sha256"])
 
 
 def _evidence_dir() -> Path | None:
@@ -97,13 +101,16 @@ def test_the_real_pinned_worker_consumes_the_verified_materialized_model(
 ) -> None:
     profile, runtime = b2_runtime
     diagnostic = mujoco_qualification["nominal"]["diagnostic"]
+    # The fresh packaged-path diagnostic must reproduce the committed RES-550 reference;
+    # otherwise a changed adapter could move both sides of the parity check together.
+    assert diagnostic["trajectory_sha256"] == _REFERENCE_TRAJECTORY
     evidence_dir = _evidence_dir() or (tmp_path / "evidence")
     result = _run(
         mujoco_fixture,
         runtime,
         profile,
         identity=mujoco_identity,
-        expected_trajectory_sha256=diagnostic["trajectory_sha256"],
+        expected_trajectory_sha256=_REFERENCE_TRAJECTORY,
         evidence_dir=evidence_dir,
         evidence_name=f"{reference.platform_tag()}.json",
     )
@@ -114,6 +121,10 @@ def test_the_real_pinned_worker_consumes_the_verified_materialized_model(
         *_failure_context(observation),
     )
     assert observation.refusals == ()
+    if os.name != "nt" and os.environ.get("DYNAMISBENCH_REQUIRE_MUJOCO") == "1":
+        # The hosted Linux qualification must exercise the real aggregate scratch bound,
+        # not the sampled watchdog fallback that is only acceptable on a developer host.
+        assert observation.profile.scratch_limit_enforcement == "dedicated-filesystem"
     assert observation.runtime_matches is True
     assert observation.source_runtime.digest == observation.snapshot_runtime.digest
     assert observation.receipt is not None
@@ -133,14 +144,16 @@ def test_the_real_pinned_worker_consumes_the_verified_materialized_model(
     assert receipt.physics.all_finite is True
     assert receipt.physics.final_time_s == pytest.approx(reference.DURATION_S, abs=1e-9)
 
-    # The existing independent qualification observation is the scientific reference.
+    # The existing independent qualification observation and the committed reference must
+    # both name the same 2,000-step trajectory.
     assert receipt.physics.trajectory_sha256 == diagnostic["trajectory_sha256"]
+    assert receipt.physics.trajectory_sha256 == _REFERENCE_TRAJECTORY
     assert observation.numerical_reference is not None
     assert observation.numerical_reference["matches"] is True
-    assert (
-        observation.numerical_reference["expected_trajectory_sha256"]
-        == (diagnostic["trajectory_sha256"])
-    )
+    assert observation.numerical_reference["expected_trajectory_sha256"] == _REFERENCE_TRAJECTORY
+    assert observation.numerical_reference["observed_trajectory_sha256"] == _REFERENCE_TRAJECTORY
+    assert receipt.model is not None
+    assert receipt.model.sha256 == _REFERENCE["model_sha256"]
     assert receipt.physics.initial_time_s == diagnostic["initial"]["time_s"]
     assert receipt.physics.final_angle_rad == diagnostic["final"]["angle_rad"]
     assert (
@@ -230,9 +243,7 @@ def test_a_substituted_runtime_refuses_before_physics(
             runtime,
             profile,
             identity=mujoco_identity,
-            expected_trajectory_sha256=mujoco_qualification["nominal"]["diagnostic"][
-                "trajectory_sha256"
-            ],
+            expected_trajectory_sha256=_REFERENCE_TRAJECTORY,
             tamper=tamper,
         )
     finally:
@@ -268,9 +279,7 @@ def test_a_tampered_input_view_refuses_before_launch(
             runtime,
             profile,
             identity=mujoco_identity,
-            expected_trajectory_sha256=mujoco_qualification["nominal"]["diagnostic"][
-                "trajectory_sha256"
-            ],
+            expected_trajectory_sha256=_REFERENCE_TRAJECTORY,
             view_tamper=tamper,
         )
     assert type(raised.value).__name__ in {
@@ -299,9 +308,7 @@ def test_a_late_hardlink_in_the_runtime_refuses_before_physics(
             runtime,
             profile,
             identity=mujoco_identity,
-            expected_trajectory_sha256=mujoco_qualification["nominal"]["diagnostic"][
-                "trajectory_sha256"
-            ],
+            expected_trajectory_sha256=_REFERENCE_TRAJECTORY,
             tamper=tamper,
         )
     finally:
