@@ -18,12 +18,11 @@ the owner can decide with evidence rather than a design document.
 - Qualified integration head: `911d2e6` (`res-555-b2-main-qualification`), workflow_dispatch
   `45270650148`: all 10 jobs successful. That result qualifies `911d2e6` only; it is not a
   qualification of an unchanged old PR head.
-- Hardening code head: `d2aa5ca`. Hosted workflow_dispatch `45409652528` completed all 10
-  jobs successfully, including both `python` jobs and both comparison jobs; the Linux full
-  suite was 2871 passed / 17 skipped with 23 passed in the dedicated B2 step. The exact PR
-  head adds the final security corrections listed in §2.4; its exact-head rerun is recorded
-  in the final report. The earlier `911d2e6` result is **not** a qualification of this
-  head.
+- Hardening code head: `cc72f91`. Hosted workflow_dispatch `45431738452` attempt 3
+  completed all 10 jobs successfully, including both `python` jobs and both comparison
+  jobs; the Linux full suite was 2872 passed / 17 skipped with 24 passed in the dedicated
+  B2 step. The exact PR head adds this packet and the committed observations on top of that
+  code head. The earlier `911d2e6` result is **not** a qualification of this head.
 - A1 stack: PR #31 `bfd5e6a` → PR #32 `e705841` → PR #34 `5860904`. A1 verification,
   materialization and the 2,000-step reference trajectory are unchanged by this increment.
 - Accepted: ADR-026 (InputManifest v1, disposable CACHE, admission binding, self-contained
@@ -273,36 +272,43 @@ is evidence for the exact tree, not acceptance of any decision above.
 
 ### 2.4 Hosted exact-head evidence
 
-`workflow_dispatch` run `45409652528` on code head `d2aa5ca`:
+`workflow_dispatch` run `45431738452`, attempt 3, on code head `cc72f91`:
 
 - **All 10 jobs succeeded**, including `python (linux-x64)`, `python (windows-x64)`,
   `platform-identity`, `frontend`, `desktop`, `mujoco-receipt-comparison` and
   `res555-gate-b2-comparison`.
-- `python (linux-x64)`: the full suite in the supervisor cgroup was 2871 passed / 17
-  skipped; the dedicated B2 step was 23 passed. The downloaded
-  `res555-gate-b2-linux-x64` observation is `verdict=demonstrated` with 36/36 checks
-  passing: Landlock ABI 8, `Seccomp: 2` with one filter, `NoNewPrivs=1`, zero effective
-  capabilities, worker cgroup `/dynamisbench/res555-…`, `pids.max=64`, `pids.peak=5`,
-  `pids.events.max=0`, `populated=false`, `cgroup_cleaned=true`, dedicated 64 MiB tmpfs
-  scratch with 8,070 bytes used, zero TCP/UDP/Unix canary traffic, no inherited socket
-  descriptors, exact model SHA-256
+- `python (linux-x64)`: the full suite in the supervisor cgroup was 2872 passed / 17
+  skipped; the dedicated B2 step was 24 passed. The downloaded
+  `evidence/RES-555/gate-b2/observations/linux-x86-64.json` is `verdict=demonstrated` with
+  all 49 checks passing: Landlock ABI 8, `Seccomp: 2` with one filter, `NoNewPrivs=1`, zero
+  effective capabilities, worker cgroup `/dynamisbench/res555-…`, `pids.max=64`,
+  `pids.peak=5`, `pids.events.max=0`, `populated=false`, `cgroup_cleaned=true`, dedicated
+  64 MiB tmpfs scratch with 8,308 bytes used, zero TCP/UDP/Unix/socketpair canary traffic,
+  `io_uring_setup` and inherited-socket probes denied, exact model SHA-256
   `eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd`, 2,000 steps and
   trajectory `f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf`
   matching the committed reference in `reference-observation.json`.
-- `python (windows-x64)`: the full suite and dedicated B2 step succeeded. The Windows
-  observation is `demonstrated` with the sampled scratch watchdog and zero TCP/UDP/Unix
-  canary traffic.
-- `res555-gate-b2-comparison`: passed with identical model and trajectory digests.
+- `python (windows-x64)`: the full suite and dedicated B2 step succeeded. The downloaded
+  `observations/windows-x86-64.json` is `demonstrated` with the sampled scratch watchdog,
+  zero TCP/UDP/Unix canary traffic, the Unix family unavailable/denied, and `socketpair`
+  recorded as allowed local IPC (the profile's stated `restricted` scope).
+- `res555-gate-b2-comparison`: passed with identical model and trajectory digests; the
+  committed comparison is `observations/comparison.json`.
 
-The exact PR head adds the final security corrections derived from independent review:
-the AppContainer AC folder is reduced from package-SID full control to `RX`, the attempt is
+The code head `cc72f91` includes the final review-driven security corrections: the
+AppContainer AC folder is reduced from package-SID full control to `RX`, the attempt is
 created outside AC with explicit `..`/AC escape probes, the Administrators group is not
 granted, the same-user DACL limitation is stated as detection-only, the memory cgroup
 controller and `pids.peak` are required, socketpair/`io_uring` are probed inside the worker,
 seccomp covers inherited-socket data paths, and the Windows containment tests use the
-measured snapshot instead of rewriting host Python DACLs. Those are code/test hardening
-changes; the final exact-head CI result is recorded in the final report and must be read
-from that head.
+measured snapshot instead of rewriting host Python DACLs. The packet and observation files
+are the docs-only record on top of that code head.
+
+The first two workflow attempts on this head were not green: attempt 1 hit two pre-existing
+Windows materialization concurrency tests, and attempt 2's full suite passed but its
+dedicated Windows B2 step hit a transient empty-stderr worker exit. Attempt 3 was the
+all-job success recorded above; the B2 step is separately exercised in the full suite and
+the dedicated step.
 
 The Python job's stderr excerpt for the demonstrated Linux observation retains a
 `pyvenv.cfg` permission error from MuJoCo's short-lived GLFW helper; the same cgroup records
@@ -312,9 +318,9 @@ and reaps it (`pids.peak=5`, `populated=false`). It is described in §2.2, not s
 
 The required independent human security, runtime and scientific/architecture review has **not
 been obtained** by this increment. The engineering evidence and the exact review questions are
-in `evidence/RES-555/gate-b2/independent-review.md`. Automated adversarial tests and an
-independent automated review are supporting evidence only and are not recorded as human
-review.
+in `evidence/RES-555/gate-b2/independent-review.md`. Two automated read-only reviews
+(security/runtime and scientific/architecture) were run and their findings are dispositioned
+there; they are supporting evidence only and are not recorded as human review.
 
 ## 7. Owner action
 

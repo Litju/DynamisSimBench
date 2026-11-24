@@ -49,7 +49,8 @@ Native extraction, sealing and a production materialized-worker route remain una
    `/proc/<pid>/fd` on Linux, checks cgroup `pids.peak`/`pids.events`/`cgroup.events`,
    compares the receipt trajectory with the separately qualified
    `mujoco_qualification` reference digest, and writes a supervisor observation to
-   `evidence/res555-gate-b2/<platform>.json`.
+   `evidence/res555-gate-b2/<platform>.json`. The exact-head CI observations are committed
+   under `evidence/RES-555/gate-b2/observations/`.
 
 Only the positive materialized test names an evidence file. Every negative and verify-only
 test passes no evidence name, so it cannot overwrite the acceptance observation; the positive
