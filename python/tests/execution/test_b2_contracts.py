@@ -106,11 +106,21 @@ def test_the_isolation_profile_is_platform_explicit() -> None:
     assert windows.runtime_access == "read-execute-only"
     assert windows.scratch_access == "read-write"
     assert windows.scientific_source_access == "denied"
-    assert windows.network_access == "denied"
+    assert windows.network_access == "restricted"
+    assert windows.network_mechanism == "windows-appcontainer-firewall"
+    assert windows.process_limit_mechanism == "windows-job-object-active-process"
     assert windows.max_processes == 8
-    assert linux.max_processes is None
+    assert linux.network_access == "denied"
+    assert linux.network_mechanism == "linux-landlock-tcp+seccomp"
+    assert linux.process_limit_mechanism == "linux-cgroup-v2-pids"
+    assert linux.process_limit_scope == "tasks-and-threads"
+    assert linux.max_processes == 64
     assert "UDP" in linux.network_scope
-    assert windows.scratch_limit_enforcement == "post-exit-acceptance-bound"
+    assert linux.scratch_limit_enforcement in {
+        "sampled-watchdog",
+        "dedicated-filesystem",
+        "post-exit-acceptance-bound",
+    }
 
 
 def test_the_scratch_usage_measurement_counts_exact_bytes(tmp_path: Path) -> None:
@@ -248,11 +258,12 @@ def test_a_closure_refuses_a_junction(tmp_path: Path) -> None:
 
 def test_no_production_module_imports_the_probe_harness() -> None:
     root = Path(__file__).resolve().parents[2] / "src" / "dynamisbench"
-    forbidden = ("_b2_probe", "res555_gate_b2", "_b2_landlock")
+    forbidden = ("_b2_probe", "res555_gate_b2", "_b2_landlock", "_b2_seccomp")
     probe_only = {
         "adapters/mujoco/_b2_probe_common.py",
         "adapters/mujoco/_b2_probe_worker.py",
         "execution/_b2_landlock.py",
+        "execution/_b2_seccomp.py",
     }
     for path in sorted(root.rglob("*.py")):
         if path.relative_to(root).as_posix() in probe_only:

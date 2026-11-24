@@ -48,7 +48,15 @@ import sys
 from pathlib import Path
 
 
-def _ready(scratch: Path, mechanism: str, abi: int, profile: str, digest: str) -> None:
+def _ready(
+    scratch: Path,
+    mechanism: str,
+    abi: int,
+    profile: str,
+    digest: str,
+    *,
+    seccomp: dict[str, object] | None = None,
+) -> None:
     payload = {
         "schema": "dynamisbench.res555.sandbox-ready/1",
         "mechanism": mechanism,
@@ -57,6 +65,7 @@ def _ready(scratch: Path, mechanism: str, abi: int, profile: str, digest: str) -
         "runtime_closure_sha256": digest,
         "environment_sanitized": True,
         "environment_keys": sorted(os.environ),
+        "seccomp": seccomp or {},
     }
     (scratch / "sandbox-ready.json").write_text(
         json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\\n",
@@ -106,6 +115,13 @@ def main() -> int:
             raise SystemExit("the probe Landlock module could not be loaded")
         landlock = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(landlock)
+        seccomp_spec = importlib.util.spec_from_file_location(
+            "_b2_seccomp_probe", config["seccomp_module"]
+        )
+        if seccomp_spec is None or seccomp_spec.loader is None:
+            raise SystemExit("the probe seccomp module could not be loaded")
+        seccomp = importlib.util.module_from_spec(seccomp_spec)
+        seccomp_spec.loader.exec_module(seccomp)
         landlock.apply_limits(
             memory_bytes=int(config["memory_limit_bytes"]),
             cpu_seconds=int(config["cpu_time_seconds"]),
@@ -117,12 +133,14 @@ def main() -> int:
             read_only=[Path(item) for item in config["read_only"]],
             read_write=[Path(item) for item in config["read_write"]],
         )
+        seccomp.apply_network_policy()
         _ready(
             scratch,
             "linux-landlock",
             int(abi),
             config["profile_sha256"],
             config["runtime_closure_sha256"],
+            seccomp=seccomp.seccomp_status(),
         )
     else:
         _ready(

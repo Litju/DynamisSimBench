@@ -154,16 +154,31 @@ class IsolationProfile(_Model):
     scientific_source_access: Literal["denied"] = "denied"
     staging_access: Literal["denied"] = "denied"
     sealed_access: Literal["denied"] = "denied"
-    network_access: Literal["denied"] = "denied"
+    network_access: Literal["denied", "restricted"] = "denied"
+    network_mechanism: Literal[
+        "windows-appcontainer-firewall",
+        "linux-landlock-tcp+seccomp",
+    ]
     network_scope: str
+    process_limit_mechanism: Literal[
+        "windows-job-object-active-process",
+        "linux-cgroup-v2-pids",
+    ]
+    process_limit_scope: Literal["processes", "tasks-and-threads"]
+    process_limit_detail: str = ""
     memory_limit_bytes: int = Field(gt=0)
     cpu_time_seconds: int = Field(gt=0)
     wall_time_seconds: float = Field(gt=0)
     max_stdout_bytes: int = Field(gt=0)
     max_stderr_bytes: int = Field(gt=0)
     max_scratch_bytes: int = Field(gt=0)
-    scratch_limit_enforcement: Literal["post-exit-acceptance-bound"] = "post-exit-acceptance-bound"
-    max_processes: int | None = Field(default=None, gt=0)
+    scratch_limit_enforcement: Literal[
+        "dedicated-filesystem",
+        "sampled-watchdog",
+        "post-exit-acceptance-bound",
+    ] = "post-exit-acceptance-bound"
+    scratch_backend_detail: str = ""
+    max_processes: int = Field(gt=0)
 
     model_config = ConfigDict(
         frozen=True,
@@ -827,6 +842,8 @@ class ProbeTargets(_Model):
     allowed_write: str
     runtime_write: str
     network_port: int = Field(ge=1, le=65535)
+    network_udp_port: int = Field(ge=1, le=65535)
+    network_unix_path: str | None = None
     write_token: str
 
     model_config = ConfigDict(

@@ -159,6 +159,58 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
             ["linux-landlock", True],
         ),
         _check(
+            "linux_seccomp",
+            linux.profile.network_mechanism == "linux-landlock-tcp+seccomp"
+            and linux_checks.get("network_udp_denied", False)
+            and linux_checks.get("network_unix_denied", False)
+            and linux_checks.get("network_raw_denied", False),
+            [
+                linux.profile.network_mechanism,
+                linux_checks.get("network_udp_denied"),
+                linux_checks.get("network_unix_denied"),
+                linux_checks.get("network_raw_denied"),
+            ],
+            ["linux-landlock-tcp+seccomp", True, True, True],
+        ),
+        _check(
+            "linux_cgroup",
+            linux.profile.process_limit_mechanism == "linux-cgroup-v2-pids"
+            and linux.profile.process_limit_scope == "tasks-and-threads"
+            and linux_checks.get("external_cgroup", False)
+            and linux_checks.get("cgroup_process_limit", False)
+            and linux_checks.get("cgroup_tree_cleaned", False),
+            [
+                linux.profile.process_limit_mechanism,
+                linux.profile.process_limit_scope,
+                linux_checks.get("external_cgroup"),
+                linux_checks.get("cgroup_process_limit"),
+                linux_checks.get("cgroup_tree_cleaned"),
+            ],
+            ["linux-cgroup-v2-pids", "tasks-and-threads", True, True, True],
+        ),
+        _check(
+            "windows_job_limit",
+            windows.profile.process_limit_mechanism == "windows-job-object-active-process"
+            and windows.profile.max_processes == 8,
+            [
+                windows.profile.process_limit_mechanism,
+                windows.profile.max_processes,
+            ],
+            ["windows-job-object-active-process", 8],
+        ),
+        _check(
+            "scratch_backends_declared",
+            windows.profile.scratch_limit_enforcement
+            in {"dedicated-filesystem", "sampled-watchdog", "post-exit-acceptance-bound"}
+            and linux.profile.scratch_limit_enforcement
+            in {"dedicated-filesystem", "sampled-watchdog", "post-exit-acceptance-bound"},
+            [
+                windows.profile.scratch_limit_enforcement,
+                linux.profile.scratch_limit_enforcement,
+            ],
+            "an explicitly named scratch mechanism on both platforms",
+        ),
+        _check(
             "input_view_stable",
             windows_checks.get("input_view_unchanged", False)
             and linux_checks.get("input_view_unchanged", False),

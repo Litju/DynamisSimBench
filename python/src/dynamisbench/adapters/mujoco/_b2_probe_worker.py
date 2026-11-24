@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import stat
 import sys
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -167,12 +168,13 @@ def _probe_delete(path: str, name: str):
     )
 
 
-def _probe_network(port: int):
+def _probe_tcp(port: int):
     from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(3.0)
+    sock: socket.socket | None = None
     try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(3.0)
         sock.connect(("127.0.0.1", port))
     except PermissionError:
         return ProbeObservation(
@@ -192,9 +194,156 @@ def _probe_network(port: int):
             detail=f"{type(error).__name__}:{error.errno or winerror}",
         )
     finally:
-        sock.close()
+        if sock is not None:
+            sock.close()
     return ProbeObservation(
         name="network_connect", expectation="denied", observed="allowed", detail="connect succeeded"
+    )
+
+
+def _probe_udp(port: int):
+    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+
+    sock: socket.socket | None = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sent = sock.sendto(b"RES555-UDP", ("127.0.0.1", port))
+    except PermissionError:
+        return ProbeObservation(
+            name="network_udp",
+            expectation="denied",
+            observed="denied",
+            detail="PermissionError",
+        )
+    except OSError as error:
+        return ProbeObservation(
+            name="network_udp",
+            expectation="denied",
+            observed="denied",
+            detail=type(error).__name__,
+        )
+    finally:
+        if sock is not None:
+            sock.close()
+    # A successful sendto is not delivery evidence. The supervisor's UDP canary is the
+    # observation that no datagram arrived; Windows AppContainer accepts sendto and drops it.
+    return ProbeObservation(
+        name="network_udp",
+        expectation="denied",
+        observed="allowed",
+        detail=f"sendto returned {sent}; delivery is measured by the supervisor",
+    )
+
+
+def _probe_raw():
+    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
+        try:
+            sock.sendto(b"RES555-RAW", ("127.0.0.1", 9))
+        finally:
+            sock.close()
+    except PermissionError:
+        return ProbeObservation(
+            name="network_raw",
+            expectation="denied",
+            observed="denied",
+            detail="PermissionError",
+        )
+    except OSError as error:
+        return ProbeObservation(
+            name="network_raw",
+            expectation="denied",
+            observed="denied",
+            detail=type(error).__name__,
+        )
+    return ProbeObservation(
+        name="network_raw",
+        expectation="denied",
+        observed="allowed",
+        detail="raw socket creation and send both succeeded",
+    )
+
+
+def _probe_unix(path: str | None):
+    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+
+    if path is None or not hasattr(socket, "AF_UNIX"):
+        return ProbeObservation(
+            name="network_unix",
+            expectation="denied",
+            observed="denied",
+            detail="AF_UNIX is unavailable in this interpreter",
+        )
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.connect(path)
+        finally:
+            sock.close()
+    except PermissionError:
+        return ProbeObservation(
+            name="network_unix",
+            expectation="denied",
+            observed="denied",
+            detail="PermissionError",
+        )
+    except OSError as error:
+        return ProbeObservation(
+            name="network_unix",
+            expectation="denied",
+            observed="denied",
+            detail=type(error).__name__,
+        )
+    return ProbeObservation(
+        name="network_unix",
+        expectation="denied",
+        observed="allowed",
+        detail="Unix-domain connect succeeded",
+    )
+
+
+def _probe_inherited_sockets():
+    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+
+    if os.name == "nt":
+        return ProbeObservation(
+            name="inherited_sockets",
+            expectation="denied",
+            observed="error",
+            detail="the Windows descriptor table is checked by the supervisor's handle list",
+        )
+    sockets: list[str] = []
+    try:
+        names = os.listdir("/proc/self/fd")
+    except OSError as error:
+        return ProbeObservation(
+            name="inherited_sockets",
+            expectation="denied",
+            observed="error",
+            detail=type(error).__name__,
+        )
+    for name in names:
+        try:
+            descriptor = int(name)
+            info = os.fstat(descriptor)
+        except (OSError, ValueError):
+            continue
+        if stat.S_ISSOCK(info.st_mode):
+            sockets.append(name)
+    if sockets:
+        return ProbeObservation(
+            name="inherited_sockets",
+            expectation="denied",
+            observed="allowed",
+            detail="socket descriptors: " + ",".join(sorted(sockets))[:120],
+        )
+    return ProbeObservation(
+        name="inherited_sockets",
+        expectation="denied",
+        observed="denied",
+        detail="no socket descriptors",
     )
 
 
@@ -231,7 +380,11 @@ def _probes(config: dict[str, Any], targets, inputs_root: Path):
     observations = [
         _probe_read(targets.allowed_read, "allowed_input_read", expectation="allowed"),
         _probe_allowed_write(targets.allowed_write, targets.write_token),
-        _probe_network(targets.network_port),
+        _probe_tcp(targets.network_port),
+        _probe_udp(targets.network_udp_port),
+        _probe_raw(),
+        _probe_unix(targets.network_unix_path),
+        _probe_inherited_sockets(),
         _probe_write(targets.runtime_write, "runtime_write"),
     ]
     observations.extend(
@@ -456,9 +609,15 @@ def _run(config: dict[str, Any], request):
         raise ValueError("the input binding does not commit to this isolation profile")
 
     probes = _probes(config, targets, inputs_root)
-    if any(not probe.passed for probe in probes):
-        failed = ", ".join(probe.name for probe in probes if not probe.passed)
-        raise ValueError(f"an inside-worker isolation probe did not hold: {failed}")
+    # A successful Windows sendto is not delivery evidence; the supervisor's UDP canary is.
+    # The Windows descriptor table is likewise checked by the supervisor's handle list, not
+    # by a POSIX /proc walk. Those two observations are recorded but do not gate the worker.
+    informational = {"network_udp", "inherited_sockets"} if os.name == "nt" else set()
+    failed = [
+        probe.name for probe in probes if not probe.passed and probe.name not in informational
+    ]
+    if failed:
+        raise ValueError("an inside-worker isolation probe did not hold: " + ", ".join(failed))
 
     mode = config["mode"]
     if mode == "materialized-mujoco":
