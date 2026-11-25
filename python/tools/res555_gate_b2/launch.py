@@ -122,6 +122,14 @@ def consume_attempt(runtime: ProtectedRuntime, nonce: str, binding_sha256: str) 
         handle.write(binding_sha256.encode("ascii"))
         handle.flush()
         os.fsync(handle.fileno())
+    if os.name != "nt":
+        # Persist the new directory entry, not only the file bytes. Windows has no
+        # equivalent directory fsync; the create-exclusive name is the available primitive.
+        directory = os.open(attempts, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     return marker
 
 

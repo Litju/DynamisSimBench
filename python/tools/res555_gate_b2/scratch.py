@@ -291,7 +291,7 @@ _INVALID_HANDLE: Final = (1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1
 
 
 def _windows_stream_bytes(path: Path, logical_size: int) -> int:
-    """Return the allocated logical size of every NTFS stream on one file.
+    """Return the total logical size of every NTFS stream on one file.
 
     ``os.stat().st_size`` names only the unnamed ``:$DATA`` stream. A worker can write an
     arbitrarily large alternate data stream to a small-looking file, so the scratch
@@ -356,7 +356,7 @@ def measure_scratch(scratch: Path, *, fail_closed: bool = True) -> ScratchUsage:
     is counted as a link object, so ``links == 0`` refuses instead of silently undercounting
     unreadable bytes. The live watchdog uses ``fail_closed=False`` because a file being
     created or atomically renamed can disappear between the directory scan and the stat; a
-    single transient observation must not kill a healthy worker. Actual links, reparse
+    transient observation must not kill a healthy worker. Actual links, reparse
     points, hard links, special files and oversized content still fail in both modes, and
     the final post-exit measurement is always fail-closed.
     """
@@ -412,7 +412,13 @@ def measure_scratch(scratch: Path, *, fail_closed: bool = True) -> ScratchUsage:
 
 @dataclass
 class ScratchWatchdog:
-    """A sampled, best-effort over-budget detector; never a hard quota."""
+    """A sampled, best-effort over-budget detector; never a hard quota.
+
+    An entry that cannot be sampled is counted in ``unmeasured_samples`` and does not trigger
+    by itself; the post-exit acceptance measurement is fail-closed and refuses it. This keeps
+    a transient atomic-rename or scanner lock from killing a healthy worker without turning
+    an unmeasurable entry into an accepted result.
+    """
 
     root: Path
     limit_bytes: int
