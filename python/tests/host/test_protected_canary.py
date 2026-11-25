@@ -6,7 +6,7 @@ import socket
 
 import pytest
 
-from dynamisbench.execution.protected_canary import ProtectedNetworkCanary
+from dynamisbench.host.protected_canary import ProtectedNetworkCanary
 
 
 def test_udp_sent_immediately_before_drain_is_observed() -> None:

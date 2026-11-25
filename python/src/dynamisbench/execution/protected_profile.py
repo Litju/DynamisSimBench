@@ -38,7 +38,7 @@ __all__ = [
 
 PROTECTED_PROFILE_SCHEMA: Final = "dynamisbench.protected-execution-profile/1"
 PROTECTED_BOOTSTRAP_RELATIVE_PATH: Final = "dynamisbench/execution/protected_bootstrap.py"
-PROTECTED_WORKER_RELATIVE_PATH: Final = "dynamisbench/execution/protected_worker.py"
+PROTECTED_WORKER_RELATIVE_PATH: Final = "dynamisbench/adapters/mujoco/protected_worker.py"
 PROTECTED_RECEIPT_SCHEMA: Final = "dynamisbench.res555.consumption-receipt/1"
 PROTECTED_SUPERVISOR_RECORD_SCHEMA: Final = "dynamisbench.protected-consumption/1"
 PROTECTED_SUPERVISOR_RECORD_NAME: Final = "protected-consumption.json"

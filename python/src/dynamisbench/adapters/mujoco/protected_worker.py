@@ -35,7 +35,7 @@ def _load_config() -> dict[str, Any]:
     path = Path.cwd() / "sandbox.json"
     from hashlib import sha256
 
-    from dynamisbench.adapters.mujoco._b2_probe_common import read_bounded_regular
+    from dynamisbench.adapters.mujoco.protected_contracts import read_bounded_regular
 
     raw = read_bounded_regular(path, limit=_MAX_CONFIG_BYTES)
     expected = os.environ.get("DYNAMISBENCH_PROTECTED_CONFIG_SHA256", "")
@@ -92,7 +92,10 @@ def _write_response(request, status: str, message: str | None) -> None:
 
 
 def _probe_read(path: str, name: str, *, expectation: Literal["allowed", "denied"] = "denied"):
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation, read_bounded_regular
+    from dynamisbench.adapters.mujoco.protected_contracts import (
+        ProbeObservation,
+        read_bounded_regular,
+    )
 
     try:
         read_bounded_regular(Path(path), limit=4096)
@@ -126,7 +129,7 @@ def _probe_read(path: str, name: str, *, expectation: Literal["allowed", "denied
 
 
 def _probe_write(path: str, name: str):
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
 
     try:
         with open(path, "xb") as handle:
@@ -150,7 +153,7 @@ def _probe_write(path: str, name: str):
 
 
 def _probe_delete(path: str, name: str):
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
 
     try:
         os.unlink(path)
@@ -173,7 +176,7 @@ def _probe_delete(path: str, name: str):
 
 
 def _probe_tcp(port: int):
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
 
     sock: socket.socket | None = None
     try:
@@ -206,7 +209,7 @@ def _probe_tcp(port: int):
 
 
 def _probe_udp(port: int):
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
 
     sock: socket.socket | None = None
     try:
@@ -240,7 +243,7 @@ def _probe_udp(port: int):
 
 
 def _probe_raw():
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
 
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
@@ -271,7 +274,7 @@ def _probe_raw():
 
 
 def _probe_unix(path: str | None):
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
 
     unix_family = getattr(socket, "AF_UNIX", None)
     if path is None or unix_family is None:
@@ -310,7 +313,7 @@ def _probe_unix(path: str | None):
 
 
 def _probe_socketpair():
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
 
     try:
         left, right = socket.socketpair()
@@ -339,7 +342,7 @@ def _probe_socketpair():
 
 
 def _probe_io_uring():
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
 
     if os.name == "nt":
         return ProbeObservation(
@@ -383,7 +386,7 @@ def _probe_io_uring():
 
 
 def _probe_inherited_sockets():
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
 
     if os.name == "nt":
         return ProbeObservation(
@@ -426,7 +429,7 @@ def _probe_inherited_sockets():
 
 
 def _probe_allowed_write(target: str, token: str):
-    from dynamisbench.adapters.mujoco._b2_probe_common import (
+    from dynamisbench.adapters.mujoco.protected_contracts import (
         ProbeObservation,
         read_bounded_regular,
     )
@@ -453,7 +456,7 @@ def _probe_allowed_write(target: str, token: str):
 
 def _probes(config: dict[str, Any], targets, inputs_root: Path):
     from dynamisbench.adapters.mujoco import reference
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbeObservation
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
 
     observations = [
         _probe_read(targets.allowed_read, "allowed_input_read", expectation="allowed"),
@@ -518,7 +521,7 @@ def _probes(config: dict[str, Any], targets, inputs_root: Path):
 
 
 def _import_audit(*, site_packages: Path, source_root: Path, base_prefix: Path):
-    from dynamisbench.adapters.mujoco._b2_probe_common import ImportedModule
+    from dynamisbench.adapters.mujoco.protected_contracts import ImportedModule
 
     audited: list[ImportedModule] = []
     for name in ("dynamisbench", "pydantic", "mujoco", "numpy"):
@@ -546,7 +549,7 @@ def _run_materialized(
     package_asset_denied: bool,
 ):
     from dynamisbench.adapters.mujoco import reference
-    from dynamisbench.adapters.mujoco._b2_probe_common import ProbePolicyError
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbePolicyError
 
     # The protected worker is headless. This is also set by the generated bootstrap before
     # any scientific import; setting it here keeps a direct worker invocation headless too.
@@ -554,7 +557,7 @@ def _run_materialized(
     os.environ["MUJOCO_GL"] = "disable"
     if view.asset_sha256 != reference.MODEL_SHA256:
         raise ProbePolicyError("the input-view model is not the reviewed reference XML")
-    from dynamisbench.adapters.mujoco._b2_probe_common import reconstruct_implementation_digest
+    from dynamisbench.adapters.mujoco.protected_contracts import reconstruct_implementation_digest
 
     digest, source_manifest = reconstruct_implementation_digest(
         model_sha256=view.asset_sha256,
@@ -614,7 +617,10 @@ def _run_materialized(
     diagnostic = run.diagnostic
     if diagnostic.steps != reference.STEPS:
         raise ProbePolicyError("the reference run did not execute the pinned 2,000 steps")
-    from dynamisbench.adapters.mujoco._b2_probe_common import ModelConsumption, PhysicsObservation
+    from dynamisbench.adapters.mujoco.protected_contracts import (
+        ModelConsumption,
+        PhysicsObservation,
+    )
 
     mass, distance, inertia = physics.hinge_parameters(model)
     package_path = Path(reference.__file__).resolve().parent / reference.MODEL_ASSET_PATH
@@ -661,7 +667,7 @@ def _run_materialized(
 
 def _run(config: dict[str, Any], request):
     from dynamisbench.adapters.mujoco import dependencies
-    from dynamisbench.adapters.mujoco._b2_probe_common import (
+    from dynamisbench.adapters.mujoco.protected_contracts import (
         MAX_RECEIPT_BYTES,
         ConsumptionReceipt,
         ProbeTargets,
@@ -800,7 +806,7 @@ def _run(config: dict[str, Any], request):
 def _write_failure_receipt(config: dict[str, Any], request, error: BaseException) -> None:
     """Best-effort bounded failure observation; never claim completion."""
     try:
-        from dynamisbench.adapters.mujoco._b2_probe_common import (
+        from dynamisbench.adapters.mujoco.protected_contracts import (
             MAX_RECEIPT_BYTES,
             ConsumptionReceipt,
             sha256_bytes,

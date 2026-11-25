@@ -150,8 +150,8 @@ def _apply_limits_and_sandbox(config: dict[str, Any]) -> tuple[int, dict[str, ob
     source_root = Path(config["source_root"]).resolve()
     if config["mechanism"] != "linux-landlock":
         return 0, {}
-    landlock = _fixed_module(source_root, "dynamisbench/execution/_b2_landlock.py")
-    seccomp = _fixed_module(source_root, "dynamisbench/execution/_b2_seccomp.py")
+    landlock = _fixed_module(source_root, "dynamisbench/execution/landlock.py")
+    seccomp = _fixed_module(source_root, "dynamisbench/execution/seccomp.py")
     landlock.apply_limits(
         memory_bytes=int(config["memory_limit_bytes"]),
         cpu_seconds=int(config["cpu_time_seconds"]),
@@ -247,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
             bootstrap_sha256=bootstrap_sha256,
         )
         _prepare_sys_path(config)
-        from dynamisbench.execution.protected_worker import main as worker_main
+        from dynamisbench.adapters.mujoco.protected_worker import main as worker_main
 
         return worker_main()
     except BaseException as error:  # noqa: BLE001 - never claim a response before the worker
