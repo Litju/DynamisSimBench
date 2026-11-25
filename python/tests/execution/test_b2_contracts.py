@@ -15,6 +15,7 @@ from typing import Any, cast
 import pytest
 from tools.res555_gate_b2.launch import (
     ProtectedLaunchError,
+    _NetworkCanary,
     _scratch_usage,
     run_protected_probe,
 )
@@ -133,6 +134,18 @@ def test_the_scratch_usage_measurement_counts_exact_bytes(tmp_path: Path) -> Non
     (scratch / "logs").mkdir()
     (scratch / "logs" / "worker.txt").write_bytes(b"abc")
     assert _scratch_usage(scratch) == (8, 2, 0, 0)
+
+
+def test_each_active_canary_receives_a_control_before_worker_traffic() -> None:
+    canary = _NetworkCanary()
+    try:
+        control = canary.self_check()
+        assert all(control.values()), control
+        assert canary.tcp_connections == 0
+        assert canary.udp_datagrams == 0
+        assert canary.unix_connections == 0
+    finally:
+        canary.close()
 
 
 def test_a_materialized_probe_requires_a_qualified_trajectory(
