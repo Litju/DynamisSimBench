@@ -1,10 +1,19 @@
 # RES-555 — D3/D4, runtime-closure and adapter-identity owner adoption record
 
-Status: **PROPOSED. NOT ADOPTED. THE AGENT DOES NOT APPROVE THIS RECORD.**
-This is the exact record for the owner to accept, amend or reject in the existing RES-555
-Linear authority. No row below is an approval until the owner signs it. The record is limited
-to the strictly pinned MuJoCo reference profile and does not activate ADR-027, native output,
-canonicalization, assessment or sealing.
+Status: **OWNER CONDITIONAL APPROVAL RECORDED (OPTION A). PRODUCTION NOT YET ACTIVATED.**
+The owner selected option A on 2026-11-25 through the T3 Code decision request: adopt D3,
+D4, measured-snapshot runtime semantics and the two adapter implementation digests for the
+strictly pinned-reference profile only, subject to the blocking corrections and re-qualification
+in §3. The agent recorded that answer; it did not choose or sign it. The record is limited to
+the pinned MuJoCo reference profile and does not activate ADR-027, native output,
+canonicalization, assessment or sealing. RES-555 remains In Review.
+
+The owner answered:
+
+> A. Approve conditionally (Recommended) — Adopt D3, D4, measured-snapshot runtime semantics
+> and the two adapter digests for the pinned profile only, subject to fixing the seven review
+> blockers, stack reconciliation, exact-head re-qualification and the independent human
+> review. Authorize the production increment only after those corrections.
 
 ## 1. Scope of the record
 
@@ -202,17 +211,18 @@ The owner is asked to choose one:
 
 | Field | Owner entry |
 |---|---|
-| Decision (A/B/C) | |
-| Owner name / role | |
-| Date | |
-| Linear RES-555 reference / decision comment | |
-| Adapter identity re-accepted (Windows digest / Linux digest) | |
-| Persisted supervisor record name/schema | |
-| Windows production principal (non-elevated required? accepted residual?) | |
-| Linux delegated cgroup + dedicated scratch required? | |
-| Pinned reference accepted (`f585292...`)? | |
-| Blocking conditions accepted (§3)? | |
-| Human reviewer name / role / exact head / date / disposition | |
+| Decision (A/B/C) | **A. Approve conditionally** |
+| Owner name / role | **Litju (owner), via T3 Code RES-555 decision request** |
+| Date | **2026-11-25** |
+| Linear RES-555 reference / decision comment | RES-555. This session cannot write the Linear API; the owner should paste/confirm this record in the existing issue. |
+| Adapter identity re-accepted (Windows digest / Linux digest) | **Windows `4a907d4262ceca66588188ddcc37894ec488a55f0756886864c89bc5f99827b8`; Linux `7993ac96c91de71a7b5f8770d444c318d6c1283de5b8f0f0d1c615d7c6afe097`** |
+| Persisted supervisor record name/schema | **`protected-consumption.json` / `dynamisbench.protected-consumption/1`** (accepted conditionally; worker sidecar remains `scratch/consumption.json`) |
+| Windows production principal (non-elevated required? accepted residual?) | **Non-elevated required for production. The hosted elevated CI token remains mechanism evidence only; a non-elevated principal or an explicit residual acceptance and re-qualification is still required.** |
+| Linux delegated cgroup + dedicated scratch required? | **Yes for production.** |
+| Pinned reference accepted (`f585292...`)? | **Yes, `f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf`, with the numeric values in §1.** |
+| Blocking conditions accepted (§3)? | **Yes; production is not activated until they are implemented, exact-head re-qualified, and the human review is recorded.** |
+| Human reviewer name / role / exact head / date / disposition | **PENDING — the independent human security/runtime/scientific sign-off is not obtained by this record or the automated review.** |
 
-**No row is approved by this document. The agent has not adopted any decision on the owner's
-behalf.**
+**The owner conditionally approved the direction. No production activation, native output,
+canonicalization, assessment, seal or RES-555 completion follows from this record. The agent
+did not adopt the decision on the owner's behalf; the owner's explicit answer is the record.**
