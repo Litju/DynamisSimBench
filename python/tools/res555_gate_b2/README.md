@@ -19,8 +19,15 @@ Native extraction, sealing and a production materialized-worker route remain una
 4. Resolves the strongest truthful scratch mechanism the host provides:
    - a dedicated 64 MiB tmpfs/volume root when the host provisions one
      (`DYNAMISBENCH_RES555_B2_SCRATCH_ROOT`), which is a real aggregate allocation bound;
-   - otherwise a sampled supervisor watchdog, which is explicitly **not** a hard quota;
+   - otherwise a sampled supervisor watchdog, which is explicitly **not** a hard quota and
+     which tolerates a single transient stat race (for example an atomic rename or a scanner
+     briefly holding a file) without killing a healthy worker; the post-exit measurement
+     remains fail-closed;
    - otherwise the historical post-exit acceptance bound.
+   Before launch the supervisor also requires enough free space on the scratch volume for
+   the declared bound (2× the bound when only the sampled watchdog is available). On Windows
+   the byte count includes every NTFS alternate data stream, not only the unnamed stream that
+   `os.stat().st_size` reports.
 5. Launches the pinned worker:
    - **Windows:** a per-attempt AppContainer profile with a suspended `CreateProcessW`,
      `SECURITY_CAPABILITIES`, a bounded Job Object, an explicit
@@ -30,7 +37,11 @@ Native extraction, sealing and a production materialized-worker route remain una
      measured attempt. During the attempt the interactive user has `RX,DE,DC` on those
      trees, so the **worker token** cannot rewrite the measured bytes. The user owns the
      tree and can change its DACL, so this is not a same-user immutability barrier; the
-     post-exit closures detect a change. The supervisor reads the worker token from outside.
+     post-exit closures detect a change. The supervisor reads the worker token from outside,
+     including its package SID, `TokenCapabilities` (the check requires zero capabilities),
+     privileges, integrity level and elevation facts. A high-integrity CI runner is recorded
+     as elevated; that is not treated as an isolation grant, and production must not use the
+     elevated CI principal as its security argument.
    - **Linux:** the installed venv interpreter with a fixed bootstrap that applies
      `PR_SET_NO_NEW_PRIVS`, zero capabilities, rlimits, an irreversible Landlock ABI >= 4
      filesystem allowlist and TCP deny, and then a seccomp-BPF policy that denies socket
@@ -43,14 +54,15 @@ Native extraction, sealing and a production materialized-worker route remain una
    its own runtime, runs inside-worker read/write/delete/network/descriptor/package-model
    probes, compiles the view XML with the pinned MuJoCo release, runs the existing
    2,000-step reference, and writes a bounded consumption receipt.
-7. The supervisor correlates the receipt with its fresh nonce, binding, request, manifest,
-   runtime and profile, re-verifies the input view and runtime after exit, checks the
-   localhost TCP/UDP/Unix canaries, reads `/proc/<pid>/status`, `/proc/<pid>/cgroup` and
-   `/proc/<pid>/fd` on Linux, checks cgroup `pids.peak`/`pids.events`/`cgroup.events`,
-   compares the receipt trajectory with the separately qualified
-   `mujoco_qualification` reference digest, and writes a supervisor observation to
-   `evidence/res555-gate-b2/<platform>.json`. The exact-head CI observations are committed
-   under `evidence/RES-555/gate-b2/observations/`.
+7. The supervisor correlates the receipt with its fresh nonce, binding, request, preflight,
+   manifest, environment, worker selection, runtime and profile; re-verifies the input view
+   and runtime after exit; first proves each active localhost TCP/UDP/Unix canary receives a
+   supervisor control connection/datagram and then requires zero worker traffic; reads
+   `/proc/<pid>/status`, `/proc/<pid>/cgroup` and `/proc/<pid>/fd` on Linux; checks cgroup
+   `pids.peak`/`pids.events`/`cgroup.events`; compares the receipt trajectory with the
+   separately qualified `mujoco_qualification` reference digest; and writes a supervisor
+   observation to `evidence/res555-gate-b2/<platform>.json`. The exact-head CI observations
+   are committed under `evidence/RES-555/gate-b2/observations/`.
 
 Only the positive materialized test names an evidence file. Every negative and verify-only
 test passes no evidence name, so it cannot overwrite the acceptance observation; the positive
@@ -108,14 +120,17 @@ CI sets it and treats an unavailable mechanism as a failure. There is no A1 fall
   post-exit acceptance check is never described as prevention. `RLIMIT_FSIZE` is a per-file
   limit, not an aggregate one.
 - **Windows scratch is a sampled watchdog, not a hard quota.** A host-provisioned dedicated
-  volume root is accepted when present; the standard desktop host has none. Job Object
-  memory limits are memory limits, not disk limits.
-- **Windows network is restricted, not universal no-socket.** AppContainer without an
-  internet capability drops outbound TCP (the localhost canary receives no connection) and
-  UDP (the `sendto` call can return success but no datagram reaches the canary); raw send is
-  denied and the Unix-domain attempt is denied with no connection reaching the canary.
-  `socketpair` remains available as local in-process IPC, so the profile says `restricted`,
-  not `denied`.
+  volume root is accepted when present; the standard desktop host has none. The watchdog
+  counts alternate data streams and requires pre-launch free-space headroom, but a fast
+  writer can still exceed the bound before the next sample. Job Object memory limits are
+  memory limits, not disk limits. The final post-exit measurement is fail-closed.
+- **Windows network is restricted, not universal no-socket or no-UDP.** The probe measured
+  one outbound path per family to a supervisor localhost canary, after proving the canary
+  could receive control traffic: the TCP connect did not complete, one UDP `sendto` returned
+  success but zero datagrams arrived, raw send was denied, and AF_UNIX was unavailable in
+  that interpreter. `socketpair` remains available as local in-process IPC. This is a
+  delivery observation for the measured paths, not a proof that every destination or every
+  socket family is denied; the profile says `restricted`, not `denied`.
 - **Linux network is denied through two controls, not one.** Landlock ABI 4 denies TCP
   bind/connect; seccomp denies the socket families and data paths Landlock does not cover,
   plus `io_uring`, so no IP, raw or Unix-domain socket communication remains. The kernel
@@ -129,11 +144,12 @@ CI sets it and treats an unavailable mechanism as a failure. There is no A1 fall
   folder from package-SID writes, but a same-user owner can change the DACL and rewrite;
   deletion is also possible. Both are detected by the post-exit closure, not prevented. A
   read-only volume or a different principal remains the stronger production answer.
-- **The MuJoCo/GLFW import launches a short-lived helper Python process.** Under the
-  Linux Landlock domain that helper cannot read the worker venv's `pyvenv.cfg`, so it exits
-  with a bounded stderr message while the headless reference worker continues. The cgroup
-  records and reaps it (`pids.peak=5` in the qualified run); it is a real task requirement,
-  not an escape. The stderr excerpt is retained rather than suppressed.
+- **The headless worker disables the GL backend.** `MUJOCO_GL=disable` is set in the
+  sanitized bootstrap environment before any scientific import, so MuJoCo does not import
+  PyGLFW and does not spawn its version-check helper. This removes the previous
+  `pyvenv.cfg` denial and keeps the worker a single Python process. The supervisor records a
+  `headless_gl` check and refuses a demonstrated attempt if the helper signature reappears.
+  Physics is unchanged; the 2,000-step trajectory is identical.
 - **Runtime provenance is measured bytes, not a vendor signature.** The dependency closure
   and interpreter are hashed; the wheel/builder identity is not authenticated.
 - **Adapter identity changed.** `physics.compile_model()` is part of
@@ -143,10 +159,13 @@ CI sets it and treats an unavailable mechanism as a failure. There is no A1 fall
 - **The worker receipt is untrusted.** It is a bounded self-report; the supervisor authors
   the correlation and the external observations. It is not signed and not native evidence.
 - No vendor-authenticated wheels or interpreter binary.
-- On an elevated CI runner the AppContainer token can report `elevated=true`; the probe records
-  that fact but does not treat it as isolation. The package-SID/restricted-token file access,
-  the explicit DACLs and the in-worker denial probes are the evidence. A non-elevated local
-  run records `elevated=false` and the same denials.
+- On an elevated CI runner the AppContainer token reports `elevated=true` and a high
+  integrity level; the probe records both and also enumerates `TokenCapabilities` and
+  privileges. The demonstrated check requires the expected package SID and **zero
+  capabilities**. It does not claim that elevation or every privilege is absent, and the
+  elevated CI principal is not the production principal: a production adoption must run the
+  supervisor non-elevated or explicitly accept that residual. A non-elevated local run
+  records `elevated=false` and the same package-SID denials.
 - On Windows the AppContainer's inherited environment is sanitized by the measured bootstrap
   because `CreateProcessW` in an AppContainer rejected explicit environment blocks on the
   qualified host. `-I` ignores Python environment overrides and the AppContainer denies the
