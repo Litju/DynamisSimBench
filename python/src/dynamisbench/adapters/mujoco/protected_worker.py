@@ -675,6 +675,7 @@ def _run(config: dict[str, Any], request):
         measure_runtime_identity,
         read_bounded_regular,
         sha256_bytes,
+        sha256_file,
         verify_view,
         write_canonical_atomic,
     )
@@ -693,9 +694,18 @@ def _run(config: dict[str, Any], request):
         source_root=Path(config["source_root"]),
         model_asset_relative="assets/reference_pendulum.xml",
     )
-    if identity.digest != config["runtime_closure_sha256"]:
+    venv_config_sha256 = config.get("venv_config_sha256")
+    venv_config_path = config.get("venv_config_path")
+    if venv_config_path:
+        _, observed_venv = sha256_file(Path(str(venv_config_path)), max_bytes=256 * 1024)
+        if observed_venv != venv_config_sha256:
+            raise ValueError("the selected pyvenv.cfg does not match the pinned closure")
+    from dynamisbench.execution.protected_runtime import protected_runtime_digest
+
+    protected_digest = protected_runtime_digest(identity, venv_config_sha256)
+    if protected_digest != config["runtime_closure_sha256"]:
         raise ValueError("the worker runtime does not match the supervisor-measured closure")
-    if view.binding.runtime_closure_sha256 != identity.digest:
+    if view.binding.runtime_closure_sha256 != protected_digest:
         raise ValueError("the input binding does not commit to this worker runtime")
     if view.binding.isolation_profile_sha256 != config["profile_sha256"]:
         raise ValueError("the input binding does not commit to this isolation profile")
@@ -782,7 +792,7 @@ def _run(config: dict[str, Any], request):
         environment_sha256=view.binding.environment_sha256,
         worker_selection_sha256=view.binding.worker_selection_sha256,
         adapter_implementation_sha256=view.binding.adapter_implementation_sha256,
-        runtime_closure_sha256=identity.digest,
+        runtime_closure_sha256=protected_digest,
         isolation_profile_sha256=view.binding.isolation_profile_sha256,
         source_manifest=source_manifest,
         dependency_closure_digest=dependencies.installed_closure().digest,
@@ -791,7 +801,7 @@ def _run(config: dict[str, Any], request):
             base_digest=identity.base.digest,
             site_packages_digest=identity.site_packages_closure.digest,
             source_digest=identity.source.digest,
-            combined_digest=identity.digest,
+            combined_digest=protected_digest,
         ),
         imports=imports,
         probes=probes,
