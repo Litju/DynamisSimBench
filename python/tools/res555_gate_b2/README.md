@@ -20,9 +20,9 @@ Native extraction, sealing and a production materialized-worker route remain una
    - a dedicated 64 MiB tmpfs/volume root when the host provisions one
      (`DYNAMISBENCH_RES555_B2_SCRATCH_ROOT`), which is a real aggregate allocation bound;
    - otherwise a sampled supervisor watchdog, which is explicitly **not** a hard quota and
-     which tolerates a single transient stat race (for example an atomic rename or a scanner
+     which tolerates a transient stat race (for example an atomic rename or a scanner
      briefly holding a file) without killing a healthy worker; the post-exit measurement
-     remains fail-closed;
+     remains fail-closed and refuses a persistently unmeasurable entry;
    - otherwise the historical post-exit acceptance bound.
    Before launch the supervisor also requires enough free space on the scratch volume for
    the declared bound (2× the bound when only the sampled watchdog is available). On Windows
@@ -159,13 +159,14 @@ CI sets it and treats an unavailable mechanism as a failure. There is no A1 fall
 - **The worker receipt is untrusted.** It is a bounded self-report; the supervisor authors
   the correlation and the external observations. It is not signed and not native evidence.
 - No vendor-authenticated wheels or interpreter binary.
-- On an elevated CI runner the AppContainer token reports `elevated=true` and a high
-  integrity level; the probe records both and also enumerates `TokenCapabilities` and
-  privileges. The demonstrated check requires the expected package SID and **zero
-  capabilities**. It does not claim that elevation or every privilege is absent, and the
-  elevated CI principal is not the production principal: a production adoption must run the
-  supervisor non-elevated or explicitly accept that residual. A non-elevated local run
-  records `elevated=false` and the same package-SID denials.
+- On the elevated CI runner the worker token reports `elevated=true` but integrity
+  `S-1-16-4096` (low), zero capabilities, and two privileges (`SeChangeNotifyPrivilege`
+  enabled, `SeIncreaseWorkingSetPrivilege` disabled). The probe records these facts and
+  enumerates `TokenCapabilities` and privileges. The demonstrated check requires the expected
+  package SID and **zero capabilities**. It does not claim that elevation or every privilege
+  is absent, and the elevated CI principal is not the production principal: a production
+  adoption must run the supervisor non-elevated or explicitly accept that residual. A
+  non-elevated local run records `elevated=false` and the same package-SID denials.
 - On Windows the AppContainer's inherited environment is sanitized by the measured bootstrap
   because `CreateProcessW` in an AppContainer rejected explicit environment blocks on the
   qualified host. `-I` ignores Python environment overrides and the AppContainer denies the

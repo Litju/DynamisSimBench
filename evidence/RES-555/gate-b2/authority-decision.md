@@ -74,10 +74,12 @@ cross-platform result; the matrix in §5 names the unverified assumptions.
   only the three stdio pipe ends.
 - **Token:** the supervisor reads the worker token from outside. The demonstrated check
   requires the expected package SID and zero `TokenCapabilities`; the observation also records
-  `TokenPrivileges`, integrity level, elevation and elevation type. On the elevated CI runner
-  the token reports `elevated=true` and high integrity. That is recorded as a host fact, not
-  used as an isolation grant; production must run non-elevated or explicitly accept the
-  residual. `TokenIsRestricted` is not used as the AppContainer claim.
+  `TokenPrivileges`, integrity level, elevation and elevation type. On the hosted elevated CI
+  runner the worker token reports `elevated=true` but integrity `S-1-16-4096` (low), zero
+  capabilities, and two privileges (`SeChangeNotifyPrivilege` enabled,
+  `SeIncreaseWorkingSetPrivilege` disabled). That is recorded as a host fact, not used as an
+  isolation grant; production must run non-elevated or explicitly accept the residual.
+  `TokenIsRestricted` is not used as the AppContainer claim.
 - **Network:** after proving each active localhost canary received a supervisor control
   connection/datagram, the worker's measured paths produced: TCP connect did not complete and
   zero connections arrived; one 10-byte UDP `sendto` returned success but zero datagrams
@@ -100,8 +102,8 @@ cross-platform result; the matrix in §5 names the unverified assumptions.
 - **Scratch:** the standard desktop host has no dedicated volume. The probe uses a sampled
   supervisor watchdog (20 ms) plus a pre-launch free-space headroom check and a post-exit
   exact measurement. The measurement enumerates NTFS alternate data streams, so a large ADS
-  cannot hide behind a small default stream. The watchdog treats a single transient
-  unmeasurable entry (an atomic rename or scanner lock) as a sampling miss, not as a link;
+  cannot hide behind a small default stream. The watchdog treats a transient unmeasurable
+  entry (an atomic rename or scanner lock) as a sampling miss, not as a link;
   actual links, reparse points, hard links and special files still trigger, and the post-exit
   check is fail-closed. A fast writer can still exceed the bound before the next sample. This
   is not a hard quota.
@@ -161,6 +163,35 @@ cross-platform result; the matrix in §5 names the unverified assumptions.
   expected to differ.
 - The comparison job is additional RES-555 evidence, not one of the eight ADR-025 gates.
 
+### 2.4 Hosted exact-head evidence
+
+Hosted `workflow_dispatch` run `45680046080` on code head `9206648` completed all 10 jobs
+successfully, including both `python` jobs, `res555-gate-b2-comparison` and
+`mujoco-receipt-comparison`.
+
+- **Windows:** the observation is `demonstrated` with 51/51 checks. The AppContainer token has
+  the expected package SID, zero capabilities, low integrity `S-1-16-4096`, and two recorded
+  privileges. The canary control received TCP, UDP and Unix control traffic and the worker
+  delivered zero canary traffic; UDP `sendto` was recorded as allowed with zero delivery.
+  Scratch used the sampled watchdog with 28,670,119,936 bytes free (headroom 134,217,728),
+  9,794 bytes used and zero unmeasured entries; the watchdog took 430 samples. Stderr was
+  empty (`headless_gl` passed). The model SHA-256 and 2,000-step trajectory match the
+  committed reference.
+- **Linux:** the observation is `demonstrated` with 57/57 checks. Landlock ABI 8, seccomp
+  filter mode 2, `NoNewPrivs=1`, zero effective capabilities, delegated cgroup
+  `pids.max=64`, `pids.peak=4`, zero `pids.events.max`, empty subtree, dedicated 64 MiB tmpfs
+  with 67,072,000 bytes available, zero canary traffic after successful controls, empty
+  stderr (`headless_gl` passed), and the same model/trajectory. The receipt's run id,
+  preflight, environment, worker-selection, adapter, runtime, profile and reference trajectory
+  all correlate with the supervisor's observation.
+- **Comparison:** `res555-gate-b2-comparison` passed with the same model and trajectory
+  digests. `mujoco-receipt-comparison` passed unchanged.
+
+This run qualifies code head `9206648`. The final code head `ae4957f` adds only the
+probe-presence strictness and the fsynced single-use marker; its exact-head run is recorded
+in the PR and in the committed observation set. A green run on an earlier head is not a
+qualification of a later head.
+
 ## 3. Decisions requested
 
 ### D3 — OS enforcement (hard)
@@ -194,6 +225,13 @@ Residual threat model, stated so it is not mistaken for a stronger claim:
 - **Runtime authenticity.** File hashes identify bytes, not a vendor signature. The file-level
   closure does not prove the wheel was published by an approved builder; the lockfile and
   distribution provenance are inputs to, not a substitute for, an artifact-trust decision.
+- **The trajectory is worker-authored.** The supervisor compares the receipt's 2,000-step
+  trajectory digest with the committed reference, but it does not independently re-execute
+  the physics in the supervisor process. The admission argument is that the measured sandbox
+  source is the pinned adapter; a worker that fabricates the expected digest, or a same-user
+  writer that substitutes the adapter inside a mutation window, is not detected by digest
+  comparison alone. The production increment must treat the pinned adapter as trusted code
+  and must not claim an independent scientific oracle.
 - **Landlock has no externally readable marker.** The supervisor verifies `/proc` `Seccomp`,
   `NoNewPrivs`, capabilities and cgroup membership, and the in-worker probes; a substituted
   bootstrap could decline to apply Landlock. The supervisor measures and hashes the bootstrap
@@ -327,7 +365,20 @@ successful probe run is evidence for the exact tree, not acceptance of any decis
 
 ## 7. Owner action
 
-The smallest explicit owner decision that would unblock a production increment is:
+The smallest explicit owner-adoption record that would unblock a production increment is:
+
+> For the pinned-reference profile in §0 only, adopt D3 (the per-platform mechanisms,
+> principals, allowlists and stated residuals, including the elevated Windows principal and
+> the sampled-watchdog/ADS limitation) and D4 (the v1-preserving binding and
+> supervisor-correlated receipt sidecar, with the persisted receipt name recorded). Accept the
+> measured-snapshot runtime closure and name the artifact-trust and same-user mutation gaps.
+> Re-accept the MuJoCo adapter implementation digest produced by `physics.compile_model()`.
+> Require a delegated cgroup v2 root plus dedicated scratch on Linux and a non-elevated
+> AppContainer principal on Windows for production. This adoption does not accept ADR-027,
+> native output, sealing, canonicalization or assessment, and does not mark RES-555 Done.
+> Independent human security/runtime/scientific review of the exact head remains a merge gate.
+
+The detailed decision list is:
 
 1. **D3:** accept the per-platform mechanisms, principal, allowlists and residual model above
    (or replace them and require re-qualification), including the explicit Windows elevation

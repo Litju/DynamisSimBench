@@ -97,7 +97,10 @@ parameter to this route.
   claimed bound is refused, not silently downgraded.
 - **Consumption evidence:** the receipt is worker-authored and untrusted; only the
   supervisor's correlation and external observations make it admissible. Its nonce is
-  single-use and fsynced before process creation; a consumed binding is never reusable.
+  single-use and fsynced before process creation; a consumed binding is never reusable. The
+  supervisor does not re-execute the physics; the trajectory comparison is against the
+  committed reference and the admission argument treats the measured pinned adapter as
+  trusted code. No independent scientific oracle is claimed.
 - **Protocol:** no field is added to WorkerRequest/WorkerResponse; the receipt is a sidecar
   whose schema requires owner adoption. ADR-027 native output remains separate.
 

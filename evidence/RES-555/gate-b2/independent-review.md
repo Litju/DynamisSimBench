@@ -77,6 +77,9 @@ tests and automated reviews are listed separately and must not be counted as hum
    still proposed / outside this increment.
 5. Confirm the proposed production increment is limited to the pinned reference profile, not
    a general arbitrary-model loader, and is not activated by this packet.
+6. Confirm the packet does not claim an independent physics oracle: the trajectory digest is
+   worker-authored and the supervisor only correlates it with the committed reference. The
+   pinned adapter is trusted code, not an independently validated solver.
 
 ## Reviewer findings
 
@@ -110,11 +113,13 @@ Signature / disposition (approve, approve with conditions, reject):
 - `python/tests/execution/test_b2_scratch_budget.py` — exact measurement, transient sampling
   tolerance, explicit non-dedicated refusal, sampled-watchdog truthfulness, dedicated tmpfs
   ENOSPC, Windows alternate data streams and scratch headroom.
-- Hosted exact-head `workflow_dispatch` result: recorded in
-  `evidence/RES-555/gate-b2/observations/` and the PR #35 body. The Linux full suite, the
-  dedicated B2 step, the Windows full suite/B2 step, the MuJoCo receipt comparison and the
-  B2 comparison must all pass on the exact head. A local WSL ABI 3 run is not a qualification
-  of the ABI >= 4 profile.
+- Hosted `workflow_dispatch` `45680046080` on code head `9206648`: all 10 jobs passed,
+  including the Windows B2 step (51/51 checks, zero capabilities, low integrity, sampled
+  watchdog with zero unmeasured entries), the Linux B2 step (57/57 checks, ABI 8, cgroup
+  `pids.peak=4`, dedicated tmpfs), the B2 comparison and the MuJoCo receipt comparison. The
+  final code head adds only the probe-presence strictness and fsynced marker; its exact-head
+  result is recorded in the PR and committed observations. A local WSL ABI 3 run is not a
+  qualification of the ABI >= 4 profile.
 
 ## Automated review dispositions (not human review)
 
