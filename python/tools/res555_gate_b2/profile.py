@@ -22,6 +22,7 @@ _WALL_TIME_SECONDS: Final = 180.0
 _MAX_STDOUT_BYTES: Final = 1024 * 1024
 _MAX_STDERR_BYTES: Final = 256 * 1024
 _MAX_SCRATCH_BYTES: Final = 64 * 1024 * 1024
+_MAX_SCRATCH_FILES: Final = 256
 _WINDOWS_MAX_PROCESSES: Final = 8
 # cgroup v2 pids.max counts every task, including NumPy/OpenBLAS threads. The real MuJoCo
 # reference run records pids.peak; 64 is deliberately above the observed four-vCPU worker
@@ -125,6 +126,7 @@ def build_profile(
             max_stdout_bytes=_MAX_STDOUT_BYTES,
             max_stderr_bytes=_MAX_STDERR_BYTES,
             max_scratch_bytes=_MAX_SCRATCH_BYTES,
+            max_scratch_files=_MAX_SCRATCH_FILES,
             scratch_limit_enforcement=enforcement,
             scratch_backend_detail=detail,
             max_processes=_WINDOWS_MAX_PROCESSES,
@@ -146,6 +148,7 @@ def build_profile(
             max_stdout_bytes=_MAX_STDOUT_BYTES,
             max_stderr_bytes=_MAX_STDERR_BYTES,
             max_scratch_bytes=_MAX_SCRATCH_BYTES,
+            max_scratch_files=_MAX_SCRATCH_FILES,
             scratch_limit_enforcement=enforcement,
             scratch_backend_detail=detail,
             max_processes=_LINUX_MAX_TASKS,

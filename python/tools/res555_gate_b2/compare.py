@@ -231,10 +231,12 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
             "windows_scratch_bounded",
             windows.profile.scratch_limit_enforcement
             in {"dedicated-filesystem", "sampled-watchdog"}
+            and windows.profile.max_scratch_files == 256
             and windows_checks.get("scratch_headroom", False)
             and windows_checks.get("scratch_within_limit", False),
             [
                 windows.profile.scratch_limit_enforcement,
+                windows.profile.max_scratch_files,
                 windows_checks.get("scratch_headroom"),
                 windows_checks.get("scratch_within_limit"),
             ],
@@ -243,10 +245,12 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
         _check(
             "linux_scratch_dedicated",
             linux.profile.scratch_limit_enforcement == "dedicated-filesystem"
+            and linux.profile.max_scratch_files == 256
             and linux_checks.get("scratch_headroom", False)
             and linux_checks.get("scratch_within_limit", False),
             [
                 linux.profile.scratch_limit_enforcement,
+                linux.profile.max_scratch_files,
                 linux_checks.get("scratch_headroom"),
                 linux_checks.get("scratch_within_limit"),
             ],

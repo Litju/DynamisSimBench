@@ -172,6 +172,7 @@ class IsolationProfile(_Model):
     max_stdout_bytes: int = Field(gt=0)
     max_stderr_bytes: int = Field(gt=0)
     max_scratch_bytes: int = Field(gt=0)
+    max_scratch_files: int = Field(default=256, gt=0)
     scratch_limit_enforcement: Literal[
         "dedicated-filesystem",
         "sampled-watchdog",
