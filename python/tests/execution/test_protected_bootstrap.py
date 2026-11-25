@@ -59,6 +59,10 @@ def test_a_changed_config_is_refused_before_the_sandbox(
 def test_the_environment_is_reduced_to_the_launch_allowlist(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The bootstrap intentionally deletes environment entries. Run it against a copy of the
+    # process environment so the deletions cannot leak into later tests (notably Path.home()
+    # on the hosted Windows runner).
+    monkeypatch.setattr(os, "environ", dict(os.environ))
     monkeypatch.setenv("RES555_REVIEW_SECRET", "must-not-survive")
     monkeypatch.setenv("DYNAMISBENCH_RES555_B2_PROBE", "1")
     monkeypatch.setenv("MUJOCO_GL", "egl")
