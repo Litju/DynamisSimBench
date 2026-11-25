@@ -34,6 +34,14 @@ Current main: `16adf8a7173339b7be47dffe280915e826329e3e` (`16adf8a`, RES-742 Gat
 | #34 | `res-555-a1-filesystem-checkpoints` | `5860904f37226d2d2749573a5f52c0c89c68c692` | `res-555-offline-input-verification` | stacked on #32 | [45169206418](https://github.com/Litju/DynamisSimBench/actions/runs/45169206418) **failure** (Windows `python`); integration `d310f7f` [45170458764](https://github.com/Litju/DynamisSimBench/actions/runs/45170458764) success |
 | #35 | `res-555-b2-protected-worker` | `7d436c8e8a7ea51826668520054a9bfcede9fe2b` | `res-555-a1-filesystem-checkpoints` | stacked on #34 | code `b2c2309` [45684551797](https://github.com/Litju/DynamisSimBench/actions/runs/45684551797) success (10/10); final evidence head has no exact-head run |
 
+Current B2 branch after the owner decision and correction commits:
+`5c963ebb6aaf4e828bb2ae7a8ff3b2c80b14b7dd` (`5c963eb`), docs/evidence and the first
+correction increment; code head for the original B2 observations remains `b2c2309`. The
+docs-only head `b5371fc` passed run `45701637459` (10/10). The correction head run
+`45704314850` is the exact-head qualification for the new tests; the earlier correction run
+`45704103596` covered the profile/scratch commits before the canary/status commits. No layer
+has been merged.
+
 Qualified integration facts:
 
 - `d310f7f8c1eb075208e90d2f4a39679b57e8f879` is a merge commit of `16adf8a` and the #34 head
