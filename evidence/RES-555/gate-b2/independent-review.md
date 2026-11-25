@@ -8,9 +8,9 @@ tests and automated reviews are listed separately and must not be counted as hum
 ## Exact material to review
 
 - Base: protected `main` at the branch's merge base.
-- Exact head: the PR #35 head named in `evidence/RES-555/gate-b2/authority-decision.md` and
-  the `res555-gate-b2-comparison` artifact for that head. A result on an earlier head is not
-  a qualification of this head.
+- Exact head: `b2c2309` (PR #35), the head named in `evidence/RES-555/gate-b2/authority-decision.md`
+  and the `res555-gate-b2-comparison` artifact for that head. A result on an earlier head is
+  not a qualification of this head.
 - A1 stack: PR #31 `bfd5e6a` → PR #32 `e705841` → PR #34 `5860904`.
 - Historical B2 feature head: `47ca8d3`.
 - Historical qualified integration head: `911d2e6` (workflow_dispatch `45270650148`, 10/10
@@ -37,7 +37,7 @@ tests and automated reviews are listed separately and must not be counted as hum
 3. Does the scratch mechanism match its name? `dedicated-filesystem` must be a real aggregate
    capacity bound; `sampled-watchdog` must not be described as a quota; the transient-sampling
    tolerance must not hide actual links or persistent unmeasurable entries; Windows alternate
-   data streams and pre-launch headroom must be counted.
+   data streams, pre-launch headroom and the 256-file/inode bound must be enforced.
 4. Is the receipt treated as untrusted? Does any check accidentally promote a worker-authored
    value to supervisor authority? Are run id, completion/failure, preflight, environment,
    worker selection, runtime, profile, adapter and trajectory all correlated?
@@ -116,10 +116,11 @@ Signature / disposition (approve, approve with conditions, reject):
 - Hosted `workflow_dispatch` `45680046080` on code head `9206648`: all 10 jobs passed,
   including the Windows B2 step (51/51 checks, zero capabilities, low integrity, sampled
   watchdog with zero unmeasured entries), the Linux B2 step (57/57 checks, ABI 8, cgroup
-  `pids.peak=4`, dedicated tmpfs), the B2 comparison and the MuJoCo receipt comparison. The
-  final code head adds only the probe-presence strictness and fsynced marker; its exact-head
-  result is recorded in the PR and committed observations. A local WSL ABI 3 run is not a
-  qualification of the ABI >= 4 profile.
+  `pids.peak=4`, dedicated tmpfs), the B2 comparison and the MuJoCo receipt comparison.
+- Final code head `b2c2309`: run `45684551797` completed all 10 jobs; Windows 51/51 and Linux
+  57/57 checks, `scratch.max_files=256`, and both comparison jobs passed. The retained
+  observations are in `evidence/RES-555/gate-b2/observations/`. A local WSL ABI 3 run is not
+  a qualification of the ABI >= 4 profile.
 
 ## Automated review dispositions (not human review)
 

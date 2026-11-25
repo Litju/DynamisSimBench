@@ -111,6 +111,35 @@
       "passed": true
     },
     {
+      "expected": "an AppContainer token with zero package capabilities",
+      "name": "windows_token_no_capabilities",
+      "observed": {
+        "appcontainer_sid": "S-1-15-2-3418935669-1158944820-240772761-1749098167-148334213-3063631104-3595862578",
+        "capabilities": [],
+        "capability_count": 0,
+        "elevated": true,
+        "elevation_type": 1,
+        "expected_sid": "S-1-15-2-3418935669-1158944820-240772761-1749098167-148334213-3063631104-3595862578",
+        "has_restrictions": false,
+        "integrity_level": "S-1-16-4096",
+        "is_appcontainer": true,
+        "privilege_count": 2,
+        "privileges": [
+          {
+            "enabled": true,
+            "name": "SeChangeNotifyPrivilege"
+          },
+          {
+            "enabled": false,
+            "name": "SeIncreaseWorkingSetPrivilege"
+          }
+        ],
+        "restricted_token": false,
+        "sid_matches": true
+      },
+      "passed": true
+    },
+    {
       "expected": [
         "linux-landlock",
         true
@@ -163,13 +192,23 @@
     {
       "expected": "a dedicated filesystem or a sampled watchdog, never post-exit only",
       "name": "windows_scratch_bounded",
-      "observed": "sampled-watchdog",
+      "observed": [
+        "sampled-watchdog",
+        256,
+        true,
+        true
+      ],
       "passed": true
     },
     {
       "expected": "the host-provisioned dedicated 64 MiB filesystem used by the qualified run",
       "name": "linux_scratch_dedicated",
-      "observed": "dedicated-filesystem",
+      "observed": [
+        "dedicated-filesystem",
+        256,
+        true,
+        true
+      ],
       "passed": true
     },
     {
@@ -178,6 +217,30 @@
         true
       ],
       "name": "input_view_stable",
+      "observed": [
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": [
+        true,
+        true
+      ],
+      "name": "headless_gl",
+      "observed": [
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": [
+        true,
+        true
+      ],
+      "name": "network_canary_control",
       "observed": [
         true,
         true

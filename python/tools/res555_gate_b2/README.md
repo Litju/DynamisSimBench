@@ -25,9 +25,10 @@ Native extraction, sealing and a production materialized-worker route remain una
      remains fail-closed and refuses a persistently unmeasurable entry;
    - otherwise the historical post-exit acceptance bound.
    Before launch the supervisor also requires enough free space on the scratch volume for
-   the declared bound (2× the bound when only the sampled watchdog is available). On Windows
-   the byte count includes every NTFS alternate data stream, not only the unnamed stream that
-   `os.stat().st_size` reports.
+   the declared bound (2× the bound when only the sampled watchdog is available). A scratch
+   tree is also bounded to 256 regular files, so empty-file/inode exhaustion is not hidden by
+   a zero-byte total. On Windows the byte count includes every NTFS alternate data stream, not
+   only the unnamed stream that `os.stat().st_size` reports.
 5. Launches the pinned worker:
    - **Windows:** a per-attempt AppContainer profile with a suspended `CreateProcessW`,
      `SECURITY_CAPABILITIES`, a bounded Job Object, an explicit

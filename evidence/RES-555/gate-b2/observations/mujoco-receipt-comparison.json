@@ -1,0 +1,1418 @@
+{
+  "authority_issue": "RES-550",
+  "checks": [
+    {
+      "limit": [
+        "b2c23093ee0db77b878abe62fa363314cd03c25e",
+        "b2c23093ee0db77b878abe62fa363314cd03c25e"
+      ],
+      "name": "checkout_is_tested_commit",
+      "observed": "b2c23093ee0db77b878abe62fa363314cd03c25e",
+      "passed": true
+    },
+    {
+      "limit": "dynamisbench.mujoco.qualification-receipt/1",
+      "name": "schema",
+      "observed": "dynamisbench.mujoco.qualification-receipt/1",
+      "passed": true
+    },
+    {
+      "limit": "ci-numerical-solution-verification",
+      "name": "kind",
+      "observed": "ci-numerical-solution-verification",
+      "passed": true
+    },
+    {
+      "limit": "40-character Git commit",
+      "name": "git_commit",
+      "observed": "b2c23093ee0db77b878abe62fa363314cd03c25e",
+      "passed": true
+    },
+    {
+      "limit": "7998fdd62b5d3b29fa5c04a50d9dce9daf506703777e2cc3b51b3ca69f88f7bd",
+      "name": "benchmark_authority",
+      "observed": "7998fdd62b5d3b29fa5c04a50d9dce9daf506703777e2cc3b51b3ca69f88f7bd",
+      "passed": true
+    },
+    {
+      "limit": "ef31253d815a43b7893e9628e03be6632f385dbd75b568ce816a561261057ccb",
+      "name": "scenario_authority",
+      "observed": "ef31253d815a43b7893e9628e03be6632f385dbd75b568ce816a561261057ccb",
+      "passed": true
+    },
+    {
+      "limit": "f31340c60166f8f37b6a4609929ef7ccf23554b294fb57889e4644d04c86d8cb",
+      "name": "realization_authority",
+      "observed": "f31340c60166f8f37b6a4609929ef7ccf23554b294fb57889e4644d04c86d8cb",
+      "passed": true
+    },
+    {
+      "limit": "7dd9bb16f04c8b15bc012b87660b55d24bd7e6108daffafeaf84f62c719a51ee",
+      "name": "sut_authority",
+      "observed": "7dd9bb16f04c8b15bc012b87660b55d24bd7e6108daffafeaf84f62c719a51ee",
+      "passed": true
+    },
+    {
+      "limit": "5391e3ba772aa7fa3b7d01f42a56585f24a4525527e6cd0ba5e672f447ae5231",
+      "name": "environment_authority",
+      "observed": "5391e3ba772aa7fa3b7d01f42a56585f24a4525527e6cd0ba5e672f447ae5231",
+      "passed": true
+    },
+    {
+      "limit": "71bbe82ec764bd6dc3496835d1e1c3d154a16d32cb2379a350b9b3c5df9d58a7",
+      "name": "execution_fingerprint",
+      "observed": "71bbe82ec764bd6dc3496835d1e1c3d154a16d32cb2379a350b9b3c5df9d58a7",
+      "passed": true
+    },
+    {
+      "limit": "mujoco",
+      "name": "engine",
+      "observed": "mujoco",
+      "passed": true
+    },
+    {
+      "limit": "3.17.0",
+      "name": "engine_version",
+      "observed": "3.17.0",
+      "passed": true
+    },
+    {
+      "limit": "3.12.13",
+      "name": "python_version",
+      "observed": "3.12.13",
+      "passed": true
+    },
+    {
+      "limit": "windows-x86-64",
+      "name": "platform",
+      "observed": "windows-x86-64",
+      "passed": true
+    },
+    {
+      "limit": "dynamisbench.mujoco.reference",
+      "name": "adapter_id",
+      "observed": "dynamisbench.mujoco.reference",
+      "passed": true
+    },
+    {
+      "limit": "0.1.0",
+      "name": "adapter_version",
+      "observed": "0.1.0",
+      "passed": true
+    },
+    {
+      "limit": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+      "name": "model_sha256",
+      "observed": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+      "passed": true
+    },
+    {
+      "limit": [
+        "forward_dynamics"
+      ],
+      "name": "capabilities",
+      "observed": [
+        "forward_dynamics"
+      ],
+      "passed": true
+    },
+    {
+      "limit": "f939e54b030cbd02c11a346867744340c1e1ccd8f9fbf74432640a0b0fcd4c99",
+      "name": "dependency_lockfile",
+      "observed": "f939e54b030cbd02c11a346867744340c1e1ccd8f9fbf74432640a0b0fcd4c99",
+      "passed": true
+    },
+    {
+      "limit": [
+        [
+          "absl-py",
+          "2.5.1"
+        ],
+        [
+          "annotated-doc",
+          "0.0.5"
+        ],
+        [
+          "annotated-types",
+          "0.8.0"
+        ],
+        [
+          "anyio",
+          "4.15.1"
+        ],
+        [
+          "click",
+          "8.5.0"
+        ],
+        [
+          "dynamisbench",
+          "0.0.0"
+        ],
+        [
+          "etils",
+          "1.14.0"
+        ],
+        [
+          "fastapi",
+          "0.162.0"
+        ],
+        [
+          "fsspec",
+          "2026.9.0"
+        ],
+        [
+          "glfw",
+          "2.11.0"
+        ],
+        [
+          "h11",
+          "0.16.0"
+        ],
+        [
+          "idna",
+          "3.20"
+        ],
+        [
+          "mujoco",
+          "3.17.0"
+        ],
+        [
+          "numpy",
+          "2.5.4"
+        ],
+        [
+          "opentelemetry-api",
+          "1.45.1"
+        ],
+        [
+          "pyarrow",
+          "26.0.0"
+        ],
+        [
+          "pydantic",
+          "2.14.1"
+        ],
+        [
+          "pydantic-core",
+          "2.50.1"
+        ],
+        [
+          "pyopengl",
+          "3.1.10"
+        ],
+        [
+          "pyyaml",
+          "6.0.3"
+        ],
+        [
+          "rfc8785",
+          "0.1.4"
+        ],
+        [
+          "starlette",
+          "1.10.0"
+        ],
+        [
+          "typing-extensions",
+          "4.16.0"
+        ],
+        [
+          "typing-inspection",
+          "0.4.4"
+        ],
+        [
+          "uvicorn",
+          "0.54.0"
+        ],
+        [
+          "websockets",
+          "17.3"
+        ],
+        [
+          "zipp",
+          "4.1.2"
+        ]
+      ],
+      "name": "dependency_packages",
+      "observed": [
+        [
+          "absl-py",
+          "2.5.1"
+        ],
+        [
+          "annotated-doc",
+          "0.0.5"
+        ],
+        [
+          "annotated-types",
+          "0.8.0"
+        ],
+        [
+          "anyio",
+          "4.15.1"
+        ],
+        [
+          "click",
+          "8.5.0"
+        ],
+        [
+          "dynamisbench",
+          "0.0.0"
+        ],
+        [
+          "etils",
+          "1.14.0"
+        ],
+        [
+          "fastapi",
+          "0.162.0"
+        ],
+        [
+          "fsspec",
+          "2026.9.0"
+        ],
+        [
+          "glfw",
+          "2.11.0"
+        ],
+        [
+          "h11",
+          "0.16.0"
+        ],
+        [
+          "idna",
+          "3.20"
+        ],
+        [
+          "mujoco",
+          "3.17.0"
+        ],
+        [
+          "numpy",
+          "2.5.4"
+        ],
+        [
+          "opentelemetry-api",
+          "1.45.1"
+        ],
+        [
+          "pyarrow",
+          "26.0.0"
+        ],
+        [
+          "pydantic",
+          "2.14.1"
+        ],
+        [
+          "pydantic-core",
+          "2.50.1"
+        ],
+        [
+          "pyopengl",
+          "3.1.10"
+        ],
+        [
+          "pyyaml",
+          "6.0.3"
+        ],
+        [
+          "rfc8785",
+          "0.1.4"
+        ],
+        [
+          "starlette",
+          "1.10.0"
+        ],
+        [
+          "typing-extensions",
+          "4.16.0"
+        ],
+        [
+          "typing-inspection",
+          "0.4.4"
+        ],
+        [
+          "uvicorn",
+          "0.54.0"
+        ],
+        [
+          "websockets",
+          "17.3"
+        ],
+        [
+          "zipp",
+          "4.1.2"
+        ]
+      ],
+      "passed": true
+    },
+    {
+      "limit": "6a2f7ad6b36c71ac3c17466934843666efe35d743502be64837bb322f8275d5c",
+      "name": "dependency_digest",
+      "observed": "6a2f7ad6b36c71ac3c17466934843666efe35d743502be64837bb322f8275d5c",
+      "passed": true
+    },
+    {
+      "limit": [
+        "__init__.py",
+        "__main__.py",
+        "assets/reference_pendulum.xml",
+        "dependencies.py",
+        "diagnostics.py",
+        "identity.py",
+        "physics.py",
+        "reference.py",
+        "reference_case.py",
+        "worker.py"
+      ],
+      "name": "source_manifest_paths",
+      "observed": [
+        "__init__.py",
+        "__main__.py",
+        "assets/reference_pendulum.xml",
+        "dependencies.py",
+        "diagnostics.py",
+        "identity.py",
+        "physics.py",
+        "reference.py",
+        "reference_case.py",
+        "worker.py"
+      ],
+      "passed": true
+    },
+    {
+      "limit": "nonempty manifest with 64-hex SHA-256 values",
+      "name": "source_manifest_hashes",
+      "observed": 10,
+      "passed": true
+    },
+    {
+      "limit": [],
+      "name": "source_manifest_content",
+      "observed": [],
+      "passed": true
+    },
+    {
+      "limit": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+      "name": "model_asset_content",
+      "observed": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+      "passed": true
+    },
+    {
+      "limit": "4a907d4262ceca66588188ddcc37894ec488a55f0756886864c89bc5f99827b8",
+      "name": "implementation_digest_recomputable",
+      "observed": "4a907d4262ceca66588188ddcc37894ec488a55f0756886864c89bc5f99827b8",
+      "passed": true
+    },
+    {
+      "limit": "dynamisbench.mujoco.qualification-receipt/1",
+      "name": "schema",
+      "observed": "dynamisbench.mujoco.qualification-receipt/1",
+      "passed": true
+    },
+    {
+      "limit": "ci-numerical-solution-verification",
+      "name": "kind",
+      "observed": "ci-numerical-solution-verification",
+      "passed": true
+    },
+    {
+      "limit": "40-character Git commit",
+      "name": "git_commit",
+      "observed": "b2c23093ee0db77b878abe62fa363314cd03c25e",
+      "passed": true
+    },
+    {
+      "limit": "7998fdd62b5d3b29fa5c04a50d9dce9daf506703777e2cc3b51b3ca69f88f7bd",
+      "name": "benchmark_authority",
+      "observed": "7998fdd62b5d3b29fa5c04a50d9dce9daf506703777e2cc3b51b3ca69f88f7bd",
+      "passed": true
+    },
+    {
+      "limit": "ef31253d815a43b7893e9628e03be6632f385dbd75b568ce816a561261057ccb",
+      "name": "scenario_authority",
+      "observed": "ef31253d815a43b7893e9628e03be6632f385dbd75b568ce816a561261057ccb",
+      "passed": true
+    },
+    {
+      "limit": "f31340c60166f8f37b6a4609929ef7ccf23554b294fb57889e4644d04c86d8cb",
+      "name": "realization_authority",
+      "observed": "f31340c60166f8f37b6a4609929ef7ccf23554b294fb57889e4644d04c86d8cb",
+      "passed": true
+    },
+    {
+      "limit": "7dd9bb16f04c8b15bc012b87660b55d24bd7e6108daffafeaf84f62c719a51ee",
+      "name": "sut_authority",
+      "observed": "7dd9bb16f04c8b15bc012b87660b55d24bd7e6108daffafeaf84f62c719a51ee",
+      "passed": true
+    },
+    {
+      "limit": "8652ad6cc054383eb301183f3036e01f673ccbe8e93b807e4c0968ffa5a73963",
+      "name": "environment_authority",
+      "observed": "8652ad6cc054383eb301183f3036e01f673ccbe8e93b807e4c0968ffa5a73963",
+      "passed": true
+    },
+    {
+      "limit": "02c58428374d82ecacb2f4b84ac6cf19442bf50e8174a5f42addf54d3e4fdfb1",
+      "name": "execution_fingerprint",
+      "observed": "02c58428374d82ecacb2f4b84ac6cf19442bf50e8174a5f42addf54d3e4fdfb1",
+      "passed": true
+    },
+    {
+      "limit": "mujoco",
+      "name": "engine",
+      "observed": "mujoco",
+      "passed": true
+    },
+    {
+      "limit": "3.17.0",
+      "name": "engine_version",
+      "observed": "3.17.0",
+      "passed": true
+    },
+    {
+      "limit": "3.12.13",
+      "name": "python_version",
+      "observed": "3.12.13",
+      "passed": true
+    },
+    {
+      "limit": "linux-x86-64",
+      "name": "platform",
+      "observed": "linux-x86-64",
+      "passed": true
+    },
+    {
+      "limit": "dynamisbench.mujoco.reference",
+      "name": "adapter_id",
+      "observed": "dynamisbench.mujoco.reference",
+      "passed": true
+    },
+    {
+      "limit": "0.1.0",
+      "name": "adapter_version",
+      "observed": "0.1.0",
+      "passed": true
+    },
+    {
+      "limit": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+      "name": "model_sha256",
+      "observed": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+      "passed": true
+    },
+    {
+      "limit": [
+        "forward_dynamics"
+      ],
+      "name": "capabilities",
+      "observed": [
+        "forward_dynamics"
+      ],
+      "passed": true
+    },
+    {
+      "limit": "f939e54b030cbd02c11a346867744340c1e1ccd8f9fbf74432640a0b0fcd4c99",
+      "name": "dependency_lockfile",
+      "observed": "f939e54b030cbd02c11a346867744340c1e1ccd8f9fbf74432640a0b0fcd4c99",
+      "passed": true
+    },
+    {
+      "limit": [
+        [
+          "absl-py",
+          "2.5.1"
+        ],
+        [
+          "annotated-doc",
+          "0.0.5"
+        ],
+        [
+          "annotated-types",
+          "0.8.0"
+        ],
+        [
+          "anyio",
+          "4.15.1"
+        ],
+        [
+          "click",
+          "8.5.0"
+        ],
+        [
+          "dynamisbench",
+          "0.0.0"
+        ],
+        [
+          "etils",
+          "1.14.0"
+        ],
+        [
+          "fastapi",
+          "0.162.0"
+        ],
+        [
+          "fsspec",
+          "2026.9.0"
+        ],
+        [
+          "glfw",
+          "2.11.0"
+        ],
+        [
+          "h11",
+          "0.16.0"
+        ],
+        [
+          "idna",
+          "3.20"
+        ],
+        [
+          "mujoco",
+          "3.17.0"
+        ],
+        [
+          "numpy",
+          "2.5.4"
+        ],
+        [
+          "opentelemetry-api",
+          "1.45.1"
+        ],
+        [
+          "pyarrow",
+          "26.0.0"
+        ],
+        [
+          "pydantic",
+          "2.14.1"
+        ],
+        [
+          "pydantic-core",
+          "2.50.1"
+        ],
+        [
+          "pyopengl",
+          "3.1.10"
+        ],
+        [
+          "pyyaml",
+          "6.0.3"
+        ],
+        [
+          "rfc8785",
+          "0.1.4"
+        ],
+        [
+          "starlette",
+          "1.10.0"
+        ],
+        [
+          "typing-extensions",
+          "4.16.0"
+        ],
+        [
+          "typing-inspection",
+          "0.4.4"
+        ],
+        [
+          "uvicorn",
+          "0.54.0"
+        ],
+        [
+          "websockets",
+          "17.3"
+        ],
+        [
+          "zipp",
+          "4.1.2"
+        ]
+      ],
+      "name": "dependency_packages",
+      "observed": [
+        [
+          "absl-py",
+          "2.5.1"
+        ],
+        [
+          "annotated-doc",
+          "0.0.5"
+        ],
+        [
+          "annotated-types",
+          "0.8.0"
+        ],
+        [
+          "anyio",
+          "4.15.1"
+        ],
+        [
+          "click",
+          "8.5.0"
+        ],
+        [
+          "dynamisbench",
+          "0.0.0"
+        ],
+        [
+          "etils",
+          "1.14.0"
+        ],
+        [
+          "fastapi",
+          "0.162.0"
+        ],
+        [
+          "fsspec",
+          "2026.9.0"
+        ],
+        [
+          "glfw",
+          "2.11.0"
+        ],
+        [
+          "h11",
+          "0.16.0"
+        ],
+        [
+          "idna",
+          "3.20"
+        ],
+        [
+          "mujoco",
+          "3.17.0"
+        ],
+        [
+          "numpy",
+          "2.5.4"
+        ],
+        [
+          "opentelemetry-api",
+          "1.45.1"
+        ],
+        [
+          "pyarrow",
+          "26.0.0"
+        ],
+        [
+          "pydantic",
+          "2.14.1"
+        ],
+        [
+          "pydantic-core",
+          "2.50.1"
+        ],
+        [
+          "pyopengl",
+          "3.1.10"
+        ],
+        [
+          "pyyaml",
+          "6.0.3"
+        ],
+        [
+          "rfc8785",
+          "0.1.4"
+        ],
+        [
+          "starlette",
+          "1.10.0"
+        ],
+        [
+          "typing-extensions",
+          "4.16.0"
+        ],
+        [
+          "typing-inspection",
+          "0.4.4"
+        ],
+        [
+          "uvicorn",
+          "0.54.0"
+        ],
+        [
+          "websockets",
+          "17.3"
+        ],
+        [
+          "zipp",
+          "4.1.2"
+        ]
+      ],
+      "passed": true
+    },
+    {
+      "limit": "6a2f7ad6b36c71ac3c17466934843666efe35d743502be64837bb322f8275d5c",
+      "name": "dependency_digest",
+      "observed": "6a2f7ad6b36c71ac3c17466934843666efe35d743502be64837bb322f8275d5c",
+      "passed": true
+    },
+    {
+      "limit": [
+        "__init__.py",
+        "__main__.py",
+        "assets/reference_pendulum.xml",
+        "dependencies.py",
+        "diagnostics.py",
+        "identity.py",
+        "physics.py",
+        "reference.py",
+        "reference_case.py",
+        "worker.py"
+      ],
+      "name": "source_manifest_paths",
+      "observed": [
+        "__init__.py",
+        "__main__.py",
+        "assets/reference_pendulum.xml",
+        "dependencies.py",
+        "diagnostics.py",
+        "identity.py",
+        "physics.py",
+        "reference.py",
+        "reference_case.py",
+        "worker.py"
+      ],
+      "passed": true
+    },
+    {
+      "limit": "nonempty manifest with 64-hex SHA-256 values",
+      "name": "source_manifest_hashes",
+      "observed": 10,
+      "passed": true
+    },
+    {
+      "limit": [],
+      "name": "source_manifest_content",
+      "observed": [],
+      "passed": true
+    },
+    {
+      "limit": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+      "name": "model_asset_content",
+      "observed": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+      "passed": true
+    },
+    {
+      "limit": "7993ac96c91de71a7b5f8770d444c318d6c1283de5b8f0f0d1c615d7c6afe097",
+      "name": "implementation_digest_recomputable",
+      "observed": "7993ac96c91de71a7b5f8770d444c318d6c1283de5b8f0f0d1c615d7c6afe097",
+      "passed": true
+    },
+    {
+      "limit": 0.001,
+      "name": "configuration_timestep_s",
+      "observed": 0.001,
+      "passed": true
+    },
+    {
+      "limit": 2.0,
+      "name": "configuration_duration_s",
+      "observed": 2.0,
+      "passed": true
+    },
+    {
+      "limit": 2000,
+      "name": "configuration_steps",
+      "observed": 2000,
+      "passed": true
+    },
+    {
+      "limit": "RK4",
+      "name": "configuration_integrator",
+      "observed": "RK4",
+      "passed": true
+    },
+    {
+      "limit": "Newton",
+      "name": "configuration_solver",
+      "observed": "Newton",
+      "passed": true
+    },
+    {
+      "limit": 100,
+      "name": "configuration_iterations",
+      "observed": 100,
+      "passed": true
+    },
+    {
+      "limit": 1e-12,
+      "name": "configuration_tolerance",
+      "observed": 1e-12,
+      "passed": true
+    },
+    {
+      "limit": 9.80665,
+      "name": "configuration_gravity_m_s2",
+      "observed": 9.80665,
+      "passed": true
+    },
+    {
+      "limit": 0.5235987755982988,
+      "name": "configuration_initial_angle_rad",
+      "observed": 0.5235987755982988,
+      "passed": true
+    },
+    {
+      "limit": 0.0,
+      "name": "configuration_initial_angular_velocity_rad_s",
+      "observed": 0.0,
+      "passed": true
+    },
+    {
+      "limit": 0,
+      "name": "configuration_seed",
+      "observed": 0,
+      "passed": true
+    },
+    {
+      "limit": "float64",
+      "name": "configuration_precision",
+      "observed": "float64",
+      "passed": true
+    },
+    {
+      "limit": [
+        "reference-state"
+      ],
+      "name": "configuration_outcomes",
+      "observed": [
+        "reference-state"
+      ],
+      "passed": true
+    },
+    {
+      "limit": 0.001,
+      "name": "configuration_timestep_s",
+      "observed": 0.001,
+      "passed": true
+    },
+    {
+      "limit": 2.0,
+      "name": "configuration_duration_s",
+      "observed": 2.0,
+      "passed": true
+    },
+    {
+      "limit": 2000,
+      "name": "configuration_steps",
+      "observed": 2000,
+      "passed": true
+    },
+    {
+      "limit": "RK4",
+      "name": "configuration_integrator",
+      "observed": "RK4",
+      "passed": true
+    },
+    {
+      "limit": "Newton",
+      "name": "configuration_solver",
+      "observed": "Newton",
+      "passed": true
+    },
+    {
+      "limit": 100,
+      "name": "configuration_iterations",
+      "observed": 100,
+      "passed": true
+    },
+    {
+      "limit": 1e-12,
+      "name": "configuration_tolerance",
+      "observed": 1e-12,
+      "passed": true
+    },
+    {
+      "limit": 9.80665,
+      "name": "configuration_gravity_m_s2",
+      "observed": 9.80665,
+      "passed": true
+    },
+    {
+      "limit": 0.5235987755982988,
+      "name": "configuration_initial_angle_rad",
+      "observed": 0.5235987755982988,
+      "passed": true
+    },
+    {
+      "limit": 0.0,
+      "name": "configuration_initial_angular_velocity_rad_s",
+      "observed": 0.0,
+      "passed": true
+    },
+    {
+      "limit": 0,
+      "name": "configuration_seed",
+      "observed": 0,
+      "passed": true
+    },
+    {
+      "limit": "float64",
+      "name": "configuration_precision",
+      "observed": "float64",
+      "passed": true
+    },
+    {
+      "limit": [
+        "reference-state"
+      ],
+      "name": "configuration_outcomes",
+      "observed": [
+        "reference-state"
+      ],
+      "passed": true
+    },
+    {
+      "limit": 1e-09,
+      "name": "final_time",
+      "observed": 1.0946799022804043e-13,
+      "passed": true
+    },
+    {
+      "limit": 1e-08,
+      "name": "maximum_angle_error",
+      "observed": 2.6697255517404983e-12,
+      "passed": true
+    },
+    {
+      "limit": 1e-07,
+      "name": "maximum_angular_velocity_error",
+      "observed": 6.447897771266753e-12,
+      "passed": true
+    },
+    {
+      "limit": 0.001,
+      "name": "velocity_consistency",
+      "observed": 2.6454810349019198e-06,
+      "passed": true
+    },
+    {
+      "limit": 1e-12,
+      "name": "energy_reconstruction",
+      "observed": 4.440892098500626e-16,
+      "passed": true
+    },
+    {
+      "limit": 1e-09,
+      "name": "relative_energy_drift",
+      "observed": 7.453078278166512e-14,
+      "passed": true
+    },
+    {
+      "limit": 1e-09,
+      "name": "diagnostic_relative_energy_drift",
+      "observed": 7.453078278166512e-14,
+      "passed": true
+    },
+    {
+      "limit": "finite positive observed and analytical periods",
+      "name": "period_source_values",
+      "observed": {
+        "analytical_period_s": 2.042358880051493,
+        "observed_period_s": 2.0423588797694
+      },
+      "passed": true
+    },
+    {
+      "limit": 0.0001,
+      "name": "period",
+      "observed": {
+        "computed_period_error_s": 2.820930156133272e-10,
+        "reported_period_error_s": 2.820930156133272e-10
+      },
+      "passed": true
+    },
+    {
+      "limit": {
+        "agreement_tolerance_s": 1e-12,
+        "nonnegative_finite_magnitude": true
+      },
+      "name": "period_error_report",
+      "observed": {
+        "absolute_difference_s": 0.0,
+        "computed_period_error_s": 2.820930156133272e-10,
+        "reported_period_error_s": 2.820930156133272e-10
+      },
+      "passed": true
+    },
+    {
+      "limit": 1e-08,
+      "name": "refinement_final_error",
+      "observed": 7.267519919196275e-13,
+      "passed": true
+    },
+    {
+      "limit": 8.0,
+      "name": "refinement_ratio_0",
+      "observed": 17.504771354774764,
+      "passed": true
+    },
+    {
+      "limit": 8.0,
+      "name": "refinement_ratio_1",
+      "observed": 16.80934538642027,
+      "passed": true
+    },
+    {
+      "limit": 8.0,
+      "name": "refinement_ratio_2",
+      "observed": 16.797739077299113,
+      "passed": true
+    },
+    {
+      "limit": 1e-09,
+      "name": "final_time",
+      "observed": 1.0946799022804043e-13,
+      "passed": true
+    },
+    {
+      "limit": 1e-08,
+      "name": "maximum_angle_error",
+      "observed": 2.662647879958513e-12,
+      "passed": true
+    },
+    {
+      "limit": 1e-07,
+      "name": "maximum_angular_velocity_error",
+      "observed": 6.447065103998284e-12,
+      "passed": true
+    },
+    {
+      "limit": 0.001,
+      "name": "velocity_consistency",
+      "observed": 2.6454810349019198e-06,
+      "passed": true
+    },
+    {
+      "limit": 1e-12,
+      "name": "energy_reconstruction",
+      "observed": 4.440892098500626e-16,
+      "passed": true
+    },
+    {
+      "limit": 1e-09,
+      "name": "relative_energy_drift",
+      "observed": 7.453078278166512e-14,
+      "passed": true
+    },
+    {
+      "limit": 1e-09,
+      "name": "diagnostic_relative_energy_drift",
+      "observed": 7.453078278166512e-14,
+      "passed": true
+    },
+    {
+      "limit": "finite positive observed and analytical periods",
+      "name": "period_source_values",
+      "observed": {
+        "analytical_period_s": 2.042358880051493,
+        "observed_period_s": 2.0423588797694
+      },
+      "passed": true
+    },
+    {
+      "limit": 0.0001,
+      "name": "period",
+      "observed": {
+        "computed_period_error_s": 2.820930156133272e-10,
+        "reported_period_error_s": 2.820930156133272e-10
+      },
+      "passed": true
+    },
+    {
+      "limit": {
+        "agreement_tolerance_s": 1e-12,
+        "nonnegative_finite_magnitude": true
+      },
+      "name": "period_error_report",
+      "observed": {
+        "absolute_difference_s": 0.0,
+        "computed_period_error_s": 2.820930156133272e-10,
+        "reported_period_error_s": 2.820930156133272e-10
+      },
+      "passed": true
+    },
+    {
+      "limit": 1e-08,
+      "name": "refinement_final_error",
+      "observed": 7.275291480368651e-13,
+      "passed": true
+    },
+    {
+      "limit": 8.0,
+      "name": "refinement_ratio_0",
+      "observed": 17.504717777364192,
+      "passed": true
+    },
+    {
+      "limit": 8.0,
+      "name": "refinement_ratio_1",
+      "observed": 16.808482776181297,
+      "passed": true
+    },
+    {
+      "limit": 8.0,
+      "name": "refinement_ratio_2",
+      "observed": 16.780711124675722,
+      "passed": true
+    },
+    {
+      "limit": "pass",
+      "name": "windows_verdict",
+      "observed": "pass",
+      "passed": true
+    },
+    {
+      "limit": "pass",
+      "name": "linux_verdict",
+      "observed": "pass",
+      "passed": true
+    },
+    {
+      "limit": {
+        "angle_rad": 1e-08,
+        "angular_velocity_rad_s": 1e-07,
+        "energy_reconstruction_j": 1e-12,
+        "energy_relative": 1e-09,
+        "final_time_s": 1e-09,
+        "period_s": 0.0001,
+        "refinement_final_angle_rad": 1e-08,
+        "refinement_min_ratio": 8.0,
+        "velocity_consistency_rad_s": 0.001
+      },
+      "name": "windows_tolerances_declared",
+      "observed": {
+        "angle_rad": 1e-08,
+        "angular_velocity_rad_s": 1e-07,
+        "energy_reconstruction_j": 1e-12,
+        "energy_relative": 1e-09,
+        "final_time_s": 1e-09,
+        "period_s": 0.0001,
+        "refinement_final_angle_rad": 1e-08,
+        "refinement_min_ratio": 8.0,
+        "velocity_consistency_rad_s": 0.001
+      },
+      "passed": true
+    },
+    {
+      "limit": {
+        "angle_rad": 1e-08,
+        "angular_velocity_rad_s": 1e-07,
+        "energy_reconstruction_j": 1e-12,
+        "energy_relative": 1e-09,
+        "final_time_s": 1e-09,
+        "period_s": 0.0001,
+        "refinement_final_angle_rad": 1e-08,
+        "refinement_min_ratio": 8.0,
+        "velocity_consistency_rad_s": 0.001
+      },
+      "name": "linux_tolerances_declared",
+      "observed": {
+        "angle_rad": 1e-08,
+        "angular_velocity_rad_s": 1e-07,
+        "energy_reconstruction_j": 1e-12,
+        "energy_relative": 1e-09,
+        "final_time_s": 1e-09,
+        "period_s": 0.0001,
+        "refinement_final_angle_rad": 1e-08,
+        "refinement_min_ratio": 8.0,
+        "velocity_consistency_rad_s": 0.001
+      },
+      "passed": true
+    },
+    {
+      "limit": "every reported check passed",
+      "name": "windows_reported_checks",
+      "observed": [],
+      "passed": true
+    },
+    {
+      "limit": "every reported check passed",
+      "name": "linux_reported_checks",
+      "observed": [],
+      "passed": true
+    },
+    {
+      "limit": "b2c23093ee0db77b878abe62fa363314cd03c25e",
+      "name": "same_head_commit",
+      "observed": "b2c23093ee0db77b878abe62fa363314cd03c25e",
+      "passed": true
+    },
+    {
+      "limit": "b2c23093ee0db77b878abe62fa363314cd03c25e",
+      "name": "same_tested_commit",
+      "observed": "b2c23093ee0db77b878abe62fa363314cd03c25e",
+      "passed": true
+    },
+    {
+      "limit": "7998fdd62b5d3b29fa5c04a50d9dce9daf506703777e2cc3b51b3ca69f88f7bd",
+      "name": "same_benchmark_authority",
+      "observed": "7998fdd62b5d3b29fa5c04a50d9dce9daf506703777e2cc3b51b3ca69f88f7bd",
+      "passed": true
+    },
+    {
+      "limit": "ef31253d815a43b7893e9628e03be6632f385dbd75b568ce816a561261057ccb",
+      "name": "same_scenario_authority",
+      "observed": "ef31253d815a43b7893e9628e03be6632f385dbd75b568ce816a561261057ccb",
+      "passed": true
+    },
+    {
+      "limit": "f31340c60166f8f37b6a4609929ef7ccf23554b294fb57889e4644d04c86d8cb",
+      "name": "same_realization_authority",
+      "observed": "f31340c60166f8f37b6a4609929ef7ccf23554b294fb57889e4644d04c86d8cb",
+      "passed": true
+    },
+    {
+      "limit": "7dd9bb16f04c8b15bc012b87660b55d24bd7e6108daffafeaf84f62c719a51ee",
+      "name": "same_sut_authority",
+      "observed": "7dd9bb16f04c8b15bc012b87660b55d24bd7e6108daffafeaf84f62c719a51ee",
+      "passed": true
+    },
+    {
+      "limit": "different from the Windows environment digest",
+      "name": "distinct_platform_environment",
+      "observed": "8652ad6cc054383eb301183f3036e01f673ccbe8e93b807e4c0968ffa5a73963",
+      "passed": true
+    },
+    {
+      "limit": "different from the Windows execution fingerprint",
+      "name": "distinct_execution_fingerprint",
+      "observed": "02c58428374d82ecacb2f4b84ac6cf19442bf50e8174a5f42addf54d3e4fdfb1",
+      "passed": true
+    },
+    {
+      "limit": "3.17.0",
+      "name": "same_engine_version",
+      "observed": "3.17.0",
+      "passed": true
+    },
+    {
+      "limit": "3.12.13",
+      "name": "same_python_version",
+      "observed": "3.12.13",
+      "passed": true
+    },
+    {
+      "limit": "f939e54b030cbd02c11a346867744340c1e1ccd8f9fbf74432640a0b0fcd4c99",
+      "name": "same_dependency_lock",
+      "observed": "f939e54b030cbd02c11a346867744340c1e1ccd8f9fbf74432640a0b0fcd4c99",
+      "passed": true
+    },
+    {
+      "limit": "6a2f7ad6b36c71ac3c17466934843666efe35d743502be64837bb322f8275d5c",
+      "name": "same_dependency_digest",
+      "observed": "6a2f7ad6b36c71ac3c17466934843666efe35d743502be64837bb322f8275d5c",
+      "passed": true
+    },
+    {
+      "limit": {
+        "duration_s": 2.0,
+        "gravity_m_s2": 9.80665,
+        "initial_angle_rad": 0.5235987755982988,
+        "initial_angular_velocity_rad_s": 0.0,
+        "integrator": "RK4",
+        "iterations": 100,
+        "outcomes": [
+          "reference-state"
+        ],
+        "precision": "float64",
+        "seed": 0,
+        "solver": "Newton",
+        "steps": 2000,
+        "timestep_s": 0.001,
+        "tolerance": 1e-12
+      },
+      "name": "same_configuration",
+      "observed": {
+        "duration_s": 2.0,
+        "gravity_m_s2": 9.80665,
+        "initial_angle_rad": 0.5235987755982988,
+        "initial_angular_velocity_rad_s": 0.0,
+        "integrator": "RK4",
+        "iterations": 100,
+        "outcomes": [
+          "reference-state"
+        ],
+        "precision": "float64",
+        "seed": 0,
+        "solver": "Newton",
+        "steps": 2000,
+        "timestep_s": 0.001,
+        "tolerance": 1e-12
+      },
+      "passed": true
+    },
+    {
+      "limit": {
+        "angle_rad": 1e-08,
+        "angular_velocity_rad_s": 1e-07,
+        "energy_reconstruction_j": 1e-12,
+        "energy_relative": 1e-09,
+        "final_time_s": 1e-09,
+        "period_s": 0.0001,
+        "refinement_final_angle_rad": 1e-08,
+        "refinement_min_ratio": 8.0,
+        "velocity_consistency_rad_s": 0.001
+      },
+      "name": "same_tolerances",
+      "observed": {
+        "angle_rad": 1e-08,
+        "angular_velocity_rad_s": 1e-07,
+        "energy_reconstruction_j": 1e-12,
+        "energy_relative": 1e-09,
+        "final_time_s": 1e-09,
+        "period_s": 0.0001,
+        "refinement_final_angle_rad": 1e-08,
+        "refinement_min_ratio": 8.0,
+        "velocity_consistency_rad_s": 0.001
+      },
+      "passed": true
+    },
+    {
+      "limit": 1e-09,
+      "name": "cross_platform_final_angle",
+      "observed": 0.0,
+      "passed": true
+    },
+    {
+      "limit": 1e-08,
+      "name": "cross_platform_final_angular_velocity",
+      "observed": 0.0,
+      "passed": true
+    },
+    {
+      "limit": 1e-05,
+      "name": "cross_platform_period",
+      "observed": 0.0,
+      "passed": true
+    }
+  ],
+  "claim": "Independent cross-platform comparison of the RES-550 MuJoCo numerical solution-verification receipts.",
+  "claim_limit": "Numerical solution verification of the fixed MuJoCo planar-pendulum reference against an independent nonlinear pendulum solve and a finite-amplitude period. This is not human biomechanical validation, not a scientific benchmark acceptance, not VVUQ PASS, and not sealed native evidence.",
+  "cross_platform": {
+    "bitwise_equality_required": false,
+    "final_angle_delta_rad": 0.0,
+    "final_angular_velocity_delta_rad_s": 0.0,
+    "linux_observed_period_s": 2.0423588797694,
+    "observed_period_delta_s": 0.0,
+    "trajectory_digest_equal": true,
+    "windows_observed_period_s": 2.0423588797694
+  },
+  "failed_checks": [],
+  "git": {
+    "linux_head_commit": "b2c23093ee0db77b878abe62fa363314cd03c25e",
+    "windows_head_commit": "b2c23093ee0db77b878abe62fa363314cd03c25e"
+  },
+  "receipts": {
+    "linux": {
+      "sha256": "29366392c187d76f34a8d6d41b98f21d6e062ce0291232f04b285385ad7a063f",
+      "verdict": "pass"
+    },
+    "windows": {
+      "sha256": "4093c0be0fc55a4de229f25c1e1d6061689a3365a8b88790188e3bb762d6d853",
+      "verdict": "pass"
+    }
+  },
+  "schema": "dynamisbench.mujoco.receipt-comparison/1",
+  "verdict": "pass"
+}

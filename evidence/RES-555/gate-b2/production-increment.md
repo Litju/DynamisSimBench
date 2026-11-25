@@ -92,9 +92,10 @@ parameter to this route.
 - **Cancellation/timeout:** the existing single cancellation path must terminate the
   sandbox-owned tree (Job Object on Windows; the delegated cgroup on Linux), verify it empty,
   reap the direct child, and return CANCELED/TIMED_OUT; no success seal is possible.
-- **Resource bounds:** the adopted memory, CPU, wall, stdout/stderr, process/task, scratch,
-  canary and no-network limits apply to the protected launch; a host that cannot enforce a
-  claimed bound is refused, not silently downgraded.
+- **Resource bounds:** the adopted memory, CPU, wall, stdout/stderr, process/task, scratch
+  byte and file-count (256 regular files), canary and no-network limits apply to the
+  protected launch; a host that cannot enforce a claimed bound is refused, not silently
+  downgraded.
 - **Consumption evidence:** the receipt is worker-authored and untrusted; only the
   supervisor's correlation and external observations make it admissible. Its nonce is
   single-use and fsynced before process creation; a consumed binding is never reusable. The

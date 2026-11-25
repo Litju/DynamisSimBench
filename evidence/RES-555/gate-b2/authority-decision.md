@@ -44,9 +44,10 @@ to this route. Native output, canonicalization, assessment and sealing remain ou
   full suite 2,872 passed / 17 skipped, 24 B2 tests, Windows full suite and B2 step, both
   comparison jobs. The committed observations on that head are
   `evidence/RES-555/gate-b2/observations/`.
-- This increment's exact head and hosted result are recorded in
-  `evidence/RES-555/gate-b2/observations/` and in the PR #35 body after the exact-head run.
-  A result on an earlier head is not a qualification of a later head.
+- This increment's qualifying code head: `9206648`, hosted run `45680046080` (10/10 jobs).
+  Final code head: `b2c2309`; its exact-head run is `45684551797` and the retained result is
+  in `evidence/RES-555/gate-b2/observations/` and the PR #35 body. A result on an earlier
+  head is not a qualification of a later head.
 - Accepted: ADR-026 (InputManifest v1, disposable CACHE, admission binding, self-contained
   inputs) and ADR-028. Proposed: ADR-027. ADR-028 does not accept ADR-027 by numbering.
 - Existing production boundary: `execute_preflighted` launches the selected diagnostic worker
@@ -102,11 +103,12 @@ cross-platform result; the matrix in §5 names the unverified assumptions.
 - **Scratch:** the standard desktop host has no dedicated volume. The probe uses a sampled
   supervisor watchdog (20 ms) plus a pre-launch free-space headroom check and a post-exit
   exact measurement. The measurement enumerates NTFS alternate data streams, so a large ADS
-  cannot hide behind a small default stream. The watchdog treats a transient unmeasurable
-  entry (an atomic rename or scanner lock) as a sampling miss, not as a link;
-  actual links, reparse points, hard links and special files still trigger, and the post-exit
-  check is fail-closed. A fast writer can still exceed the bound before the next sample. This
-  is not a hard quota.
+  cannot hide behind a small default stream. A scratch tree is also bounded to 256 regular
+  files, so empty-file/inode exhaustion is not hidden by a zero-byte total. The watchdog
+  treats a transient unmeasurable entry (an atomic rename or scanner lock) as a sampling
+  miss, not as a link; actual links, reparse points, hard links and special files still
+  trigger, and the post-exit check is fail-closed. A fast writer can still exceed the bound
+  before the next sample. This is not a hard quota.
 - **Runtime:** the probe re-measures the installed interpreter, base installation,
   site-packages, native extension files and adapter source before launch and after exit; the
   worker re-measures the snapshot. The dependency closure must equal the locked worker
@@ -174,9 +176,9 @@ successfully, including both `python` jobs, `res555-gate-b2-comparison` and
   privileges. The canary control received TCP, UDP and Unix control traffic and the worker
   delivered zero canary traffic; UDP `sendto` was recorded as allowed with zero delivery.
   Scratch used the sampled watchdog with 28,670,119,936 bytes free (headroom 134,217,728),
-  9,794 bytes used and zero unmeasured entries; the watchdog took 430 samples. Stderr was
-  empty (`headless_gl` passed). The model SHA-256 and 2,000-step trajectory match the
-  committed reference.
+  9,794 bytes used, 4 files (bound 256) and zero unmeasured entries; the watchdog took 430
+  samples. Stderr was empty (`headless_gl` passed). The model SHA-256 and 2,000-step
+  trajectory match the committed reference.
 - **Linux:** the observation is `demonstrated` with 57/57 checks. Landlock ABI 8, seccomp
   filter mode 2, `NoNewPrivs=1`, zero effective capabilities, delegated cgroup
   `pids.max=64`, `pids.peak=4`, zero `pids.events.max`, empty subtree, dedicated 64 MiB tmpfs
@@ -187,10 +189,12 @@ successfully, including both `python` jobs, `res555-gate-b2-comparison` and
 - **Comparison:** `res555-gate-b2-comparison` passed with the same model and trajectory
   digests. `mujoco-receipt-comparison` passed unchanged.
 
-This run qualifies code head `9206648`. The final code head `ae4957f` adds only the
-probe-presence strictness and the fsynced single-use marker; its exact-head run is recorded
-in the PR and in the committed observation set. A green run on an earlier head is not a
-qualification of a later head.
+This run qualifies code head `9206648`. The final code head `b2c2309` adds the probe-presence
+strictness, the fsynced single-use marker, the comparator's headless check, and the 256-file
+scratch bound as part of the canonical isolation profile. Its exact-head run `45684551797`
+also completed all 10 jobs: Windows 51/51 and Linux 57/57 checks, with the same model and
+trajectory, `scratch.max_files=256`, and both comparison jobs passing. A green run on an
+earlier head is not a qualification of a later head.
 
 ## 3. Decisions requested
 
@@ -313,7 +317,7 @@ historical reference evidence.
 | Windows UDP claim precision | Added supervisor canary positive controls; renamed the check to `network_udp_not_delivered`; the profile states one measured path, successful `sendto`, zero delivery and **not** a universal UDP denial | Other destinations/families and host firewall policy are not measured |
 | Elevated AppContainer token privileges | Read `TokenCapabilities`, `TokenPrivileges`, integrity and elevation from outside; the demonstrated check requires the expected package SID and zero capabilities | Elevation is recorded, not removed; production must be non-elevated or owner-accepted |
 | Same-user mutation / TOCTOU | Stated the exact unmeasured windows and that detection is not prevention; kept the substitution and late-hardlink refusals | A same-user writer or deletion can still win a window; a read-only volume/different principal is the production answer |
-| Windows scratch exhaustion | Count NTFS alternate data streams, reject hard links/reparse points, require pre-launch free-space headroom, and keep the sampled watchdog truthful | The watchdog can still overshoot between samples; no hard per-directory Windows quota is claimed |
+| Windows scratch exhaustion | Count NTFS alternate data streams, reject hard links/reparse points, require pre-launch free-space headroom, bound the tree to 256 regular files, and keep the sampled watchdog truthful | The watchdog can still overshoot between samples; no hard per-directory Windows quota is claimed |
 | Intermittent Windows worker exit | The live watchdog no longer treats a transient unmeasurable entry (atomic rename/scanner lock) as a link; the post-exit check remains fail-closed | A persistent unmeasurable entry is refused only at post-exit; the watchdog is best-effort |
 | Linux GLFW helper failure | `MUJOCO_GL=disable` before any scientific import; the helper is not spawned; a `headless_gl` check refuses the old stderr signature | A different MuJoCo release or rendering path would need re-qualification |
 
