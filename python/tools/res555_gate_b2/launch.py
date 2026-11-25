@@ -761,13 +761,13 @@ def run_protected_probe(
             )
         runtime_write = runtime.source_root / "dynamisbench" / f"res555-b2-write-{token}.txt"
         canary = _NetworkCanary()
-        network_control = canary.self_check()
-        if not all(network_control.values()):
-            raise ProtectedLaunchError(
-                "the supervisor's localhost canaries did not receive their control traffic; "
-                "a zero worker count would not be interpretable"
-            )
         try:
+            network_control = canary.self_check()
+            if not all(network_control.values()):
+                raise ProtectedLaunchError(
+                    "the supervisor's localhost canaries did not receive their control traffic; "
+                    "a zero worker count would not be interpretable"
+                )
             targets = ProbeTargets(
                 forbidden_reads=tuple(str(path) for path in sentinels),
                 forbidden_writes=tuple(str(path) for path in forbidden_writes),
