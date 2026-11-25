@@ -114,7 +114,10 @@ def test_windows_alternate_data_streams_are_counted(tmp_path: Path) -> None:
         assert usage.bytes >= 4097
         assert usage.links == 0
     finally:
-        os.unlink(stream)
+        try:
+            os.unlink(stream)
+        except OSError:
+            pass
 
 
 def test_a_dedicated_tmpfs_refuses_an_over_capacity_write() -> None:

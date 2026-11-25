@@ -1211,10 +1211,8 @@ def run_protected_probe(
                     _check(
                         "network_udp_not_delivered",
                         canary.udp_datagrams == 0
-                        and (
-                            os.name == "nt"
-                            or (udp_probe is not None and udp_probe.observed == "denied")
-                        ),
+                        and udp_probe is not None
+                        and (os.name == "nt" or udp_probe.observed == "denied"),
                         {
                             "canary_datagrams": canary.udp_datagrams,
                             "worker": None if udp_probe is None else udp_probe.observed,
@@ -1266,8 +1264,8 @@ def run_protected_probe(
                 checks.append(
                     _check(
                         "network_socketpair_denied",
-                        os.name == "nt"
-                        or (socketpair_probe is not None and socketpair_probe.observed == "denied"),
+                        socketpair_probe is not None
+                        and (os.name == "nt" or socketpair_probe.observed == "denied"),
                         None if socketpair_probe is None else socketpair_probe.observed,
                         "denied on Linux; local IPC remains on Windows",
                     )
@@ -1574,12 +1572,12 @@ def run_protected_probe(
                 _check(
                     "headless_gl",
                     "MUJOCO_GL" in observed_keys
-                    and b"pyvenv.cfg" not in stderr_bytes
-                    and b"GLFW" not in stderr_bytes,
+                    and b"pyvenv.cfg" not in stderr_bytes.lower()
+                    and b"glfw" not in stderr_bytes.lower(),
                     {
                         "mujoco_gl": "MUJOCO_GL" in observed_keys,
-                        "stderr_has_venv_error": b"pyvenv.cfg" in stderr_bytes,
-                        "stderr_has_glfw_error": b"GLFW" in stderr_bytes,
+                        "stderr_has_venv_error": b"pyvenv.cfg" in stderr_bytes.lower(),
+                        "stderr_has_glfw_error": b"glfw" in stderr_bytes.lower(),
                     },
                     "the headless worker starts no GLFW helper and has no venv config error",
                 )
