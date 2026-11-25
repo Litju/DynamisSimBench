@@ -168,6 +168,9 @@ else:
             _scratch,
             process,
         ):
+            assert process.token_observation["is_appcontainer"] is True
+            assert process.token_observation["capability_count"] == 0
+            assert process.token_observation["integrity_level"]
             stdout = process.stdout.read()
             stderr = process.stderr.read()
             process.wait(10.0)

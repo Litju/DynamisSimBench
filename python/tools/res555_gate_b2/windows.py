@@ -47,11 +47,16 @@ _STILL_ACTIVE: Final = 259
 _PROCESS_QUERY_LIMITED_INFORMATION: Final = 0x1000
 _TOKEN_QUERY: Final = 0x0008
 _TOKEN_USER: Final = 1
+_TOKEN_PRIVILEGES: Final = 3
 _TOKEN_ELEVATION: Final = 20
+_TOKEN_ELEVATION_TYPE: Final = 18
+_TOKEN_HAS_RESTRICTIONS: Final = 21
 _TOKEN_INTEGRITY_LEVEL: Final = 25
 _TOKEN_IS_APPCONTAINER: Final = 29
+_TOKEN_CAPABILITIES: Final = 30
 _TOKEN_APPCONTAINER_SID: Final = 31
 _TOKEN_IS_RESTRICTED: Final = 40
+_SE_PRIVILEGE_ENABLED: Final = 0x00000002
 _PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES: Final = 0x00020009
 _PROC_THREAD_ATTRIBUTE_HANDLE_LIST: Final = 0x00020002
 _EXTENDED_STARTUPINFO_PRESENT: Final = 0x00080000
@@ -184,6 +189,28 @@ class _TokenMandatoryLabel(ctypes.Structure):
     _fields_ = [("Label", _SidAndAttributes)]
 
 
+class _Luid(ctypes.Structure):
+    _fields_ = [("LowPart", wintypes.DWORD), ("HighPart", wintypes.LONG)]
+
+
+class _LuidAndAttributes(ctypes.Structure):
+    _fields_ = [("Luid", _Luid), ("Attributes", wintypes.DWORD)]
+
+
+class _TokenPrivileges(ctypes.Structure):
+    _fields_ = [
+        ("PrivilegeCount", wintypes.DWORD),
+        ("Privileges", _LuidAndAttributes * 1),
+    ]
+
+
+class _TokenCapabilities(ctypes.Structure):
+    _fields_ = [
+        ("CapabilityCount", wintypes.DWORD),
+        ("Capabilities", _SidAndAttributes * 1),
+    ]
+
+
 class _TokenAppContainerInformation(ctypes.Structure):
     _fields_ = [("TokenAppContainer", _PSID)]
 
@@ -263,6 +290,13 @@ def _configure_advapi() -> None:
     api.GetSidSubAuthorityCount.restype = ctypes.POINTER(ctypes.c_ubyte)
     api.GetSidSubAuthority.argtypes = [_PSID, wintypes.DWORD]
     api.GetSidSubAuthority.restype = ctypes.POINTER(wintypes.DWORD)
+    api.LookupPrivilegeNameW.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.POINTER(_Luid),
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    api.LookupPrivilegeNameW.restype = wintypes.BOOL
 
 
 def _configure_kernel32() -> None:
@@ -634,6 +668,71 @@ class _ProbeJob:
             _kernel32().CloseHandle(ctypes.c_void_p(handle))
 
 
+def _token_information(token: Any, info_class: int, what: str) -> Any:
+    """Return a buffer holding one variable-length token information record."""
+    size = wintypes.DWORD(0)
+    # The size probe returns FALSE with ERROR_INSUFFICIENT_BUFFER; only the size matters.
+    _advapi32().GetTokenInformation(token, info_class, None, 0, ctypes.byref(size))
+    if size.value == 0:
+        raise AppContainerError(f"{what} returned no token information")
+    buffer = ctypes.create_string_buffer(size.value)
+    _check_bool(
+        _advapi32().GetTokenInformation(token, info_class, buffer, size.value, ctypes.byref(size)),
+        what,
+    )
+    return buffer
+
+
+def _token_capabilities(token: Any) -> list[str]:
+    buffer = _token_information(
+        token, _TOKEN_CAPABILITIES, "GetTokenInformation(TokenCapabilities)"
+    )
+    count = int(ctypes.cast(buffer, ctypes.POINTER(wintypes.DWORD)).contents.value)
+    if count == 0:
+        return []
+    offset = _TokenCapabilities.Capabilities.offset
+    array_type = _SidAndAttributes * count
+    values = ctypes.cast(ctypes.addressof(buffer) + offset, ctypes.POINTER(array_type)).contents
+    return [_sid_to_string(item.Sid) for item in values]
+
+
+def _token_privileges(token: Any) -> list[dict[str, object]]:
+    buffer = _token_information(token, _TOKEN_PRIVILEGES, "GetTokenInformation(TokenPrivileges)")
+    count = int(ctypes.cast(buffer, ctypes.POINTER(wintypes.DWORD)).contents.value)
+    if count == 0:
+        return []
+    offset = _TokenPrivileges.Privileges.offset
+    array_type = _LuidAndAttributes * count
+    values = ctypes.cast(ctypes.addressof(buffer) + offset, ctypes.POINTER(array_type)).contents
+    privileges: list[dict[str, object]] = []
+    for item in values:
+        name = ctypes.create_unicode_buffer(256)
+        length = wintypes.DWORD(len(name))
+        _check_bool(
+            _advapi32().LookupPrivilegeNameW(
+                None, ctypes.byref(item.Luid), name, ctypes.byref(length)
+            ),
+            "LookupPrivilegeNameW",
+        )
+        privileges.append(
+            {
+                "name": name.value,
+                "enabled": bool(int(item.Attributes) & _SE_PRIVILEGE_ENABLED),
+            }
+        )
+    return privileges
+
+
+def _token_integrity_level(token: Any) -> str:
+    buffer = _token_information(
+        token, _TOKEN_INTEGRITY_LEVEL, "GetTokenInformation(TokenIntegrityLevel)"
+    )
+    label = ctypes.cast(buffer, ctypes.POINTER(_TokenMandatoryLabel)).contents
+    if not label.Label.Sid:
+        return ""
+    return _sid_to_string(label.Label.Sid)
+
+
 def _token_observation(pid: int, expected_sid: str) -> dict[str, object]:
     """Read the worker token from outside; this is supervisor evidence, not self-report."""
     api = _kernel32()
@@ -698,6 +797,28 @@ def _token_observation(pid: int, expected_sid: str) -> dict[str, object]:
             ),
             "GetTokenInformation(TokenElevation)",
         )
+        elevation_type = wintypes.DWORD(0)
+        _check_bool(
+            advapi.GetTokenInformation(
+                token,
+                _TOKEN_ELEVATION_TYPE,
+                ctypes.byref(elevation_type),
+                ctypes.sizeof(elevation_type),
+                ctypes.byref(size),
+            ),
+            "GetTokenInformation(TokenElevationType)",
+        )
+        has_restrictions = wintypes.DWORD(0)
+        _check_bool(
+            advapi.GetTokenInformation(
+                token,
+                _TOKEN_HAS_RESTRICTIONS,
+                ctypes.byref(has_restrictions),
+                ctypes.sizeof(has_restrictions),
+                ctypes.byref(size),
+            ),
+            "GetTokenInformation(TokenHasRestrictions)",
+        )
         restricted = wintypes.DWORD(0)
         _check_bool(
             advapi.GetTokenInformation(
@@ -709,12 +830,21 @@ def _token_observation(pid: int, expected_sid: str) -> dict[str, object]:
             ),
             "GetTokenInformation(TokenIsRestricted)",
         )
+        capabilities = _token_capabilities(token)
+        privileges = _token_privileges(token)
         return {
             "is_appcontainer": bool(is_container.value),
             "appcontainer_sid": container_sid,
             "expected_sid": expected_sid,
             "sid_matches": container_sid == expected_sid,
+            "capability_count": len(capabilities),
+            "capabilities": capabilities,
+            "privilege_count": len(privileges),
+            "privileges": privileges,
+            "integrity_level": _token_integrity_level(token),
             "elevated": bool(elevation.value),
+            "elevation_type": int(elevation_type.value),
+            "has_restrictions": bool(has_restrictions.value),
             "restricted_token": bool(restricted.value),
         }
     finally:
