@@ -324,6 +324,17 @@ worker and bootstrap still reuse the qualified B2 helper models; promoting those
 of the probe namespace is part of the launcher increment. No supervisor route, native output,
 canonicalization, assessment or seal is activated.
 
+## Production-runtime increment
+
+Two further commits add the measured runtime prerequisite without activating the route:
+
+| Commit | Scope | Validation |
+|---|---|---|
+| `13dc065` | `protected_runtime.py`: installed-environment probe, copied source/site/base snapshot, packaged-model removal, resolved-interpreter launch on Linux, `pyvenv.cfg` measurement and protected runtime digest, `-I -S` command vector, minimal supervisor environment, canonical create-exclusive sandbox config builder/writer | Unit tests for digest binding, command, environment, config canonicality, security-field change; full Windows snapshot test passed in 346.97 s and a source mutation was visible |
+| `e9d01fb` | Production worker verifies the pinned config, the Linux `pyvenv.cfg` bytes and the protected runtime digest, and writes that digest into the receipt | `test_protected_worker.py`: pinned config accepted; changed/missing digest refused |
+
+The launcher that will call this runtime is still absent. In particular, the future launcher must add the measured `pyvenv.cfg` path to the Linux read allowlist (and re-verify it after exit), pass the exact `protected_environment` mapping, use the returned `config_sha256` on the bootstrap command line, and keep the existing refusal/cancellation/timeout semantics. The Windows production principal, the stack reconciliation and the human review remain open. No production route, native output, canonicalization, assessment or seal is activated.
+
 ## What this review is not
 
 This is not the independent human security/runtime/scientific review required by RES-555.
