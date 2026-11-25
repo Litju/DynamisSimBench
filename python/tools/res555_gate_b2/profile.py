@@ -60,12 +60,15 @@ def mechanism_available() -> bool:
 
 def _window_network_scope() -> str:
     return (
-        "AppContainer without an internetClient/privateNetwork capability: outbound TCP "
-        "connects time out and no connection reaches a localhost canary; UDP sendto returns "
-        "success but no datagram reaches a localhost canary; raw send is denied; the "
-        "Unix-domain attempt is denied and no connection reaches the canary. socketpair "
-        "remains available as local in-process IPC, so this is 'restricted', not a universal "
-        "no-socket claim."
+        "AppContainer without an internetClient/privateNetwork capability. The probe "
+        "measured one outbound path per family to a supervisor localhost canary: the TCP "
+        "connect did not complete, one UDP sendto returned success but the canary received "
+        "zero datagrams, raw send was denied, and the AF_UNIX attempt was unavailable in "
+        "this interpreter. Each active canary first received a supervisor control "
+        "connection/datagram, so the zero worker counts are delivery observations for those "
+        "paths, not proof that every TCP/UDP destination or every socket family is denied. "
+        "socketpair remains available as local in-process IPC. This is 'restricted', not a "
+        "universal no-socket or no-UDP claim."
     )
 
 

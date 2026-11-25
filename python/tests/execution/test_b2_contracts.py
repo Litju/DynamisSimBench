@@ -110,6 +110,9 @@ def test_the_isolation_profile_is_platform_explicit() -> None:
     assert windows.network_mechanism == "windows-appcontainer-firewall"
     assert windows.process_limit_mechanism == "windows-job-object-active-process"
     assert windows.max_processes == 8
+    assert "canary received" in windows.network_scope
+    assert "not proof" in windows.network_scope
+    assert "universal no-socket or no-UDP" in windows.network_scope
     assert linux.network_access == "denied"
     assert linux.network_mechanism == "linux-landlock-tcp+seccomp"
     assert linux.process_limit_mechanism == "linux-cgroup-v2-pids"
@@ -129,7 +132,7 @@ def test_the_scratch_usage_measurement_counts_exact_bytes(tmp_path: Path) -> Non
     (scratch / "receipt.json").write_bytes(b"12345")
     (scratch / "logs").mkdir()
     (scratch / "logs" / "worker.txt").write_bytes(b"abc")
-    assert _scratch_usage(scratch) == (8, 2, 0)
+    assert _scratch_usage(scratch) == (8, 2, 0, 0)
 
 
 def test_a_materialized_probe_requires_a_qualified_trajectory(

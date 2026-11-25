@@ -90,6 +90,7 @@ def main() -> int:
             "PROCESSOR_ARCHITECTURE",
             "PROCESSOR_ARCHITEW6432",
             "PROCESSOR_IDENTIFIER",
+            "MUJOCO_GL",
         }:
             continue
         if normalised == "PATH":
@@ -102,6 +103,11 @@ def main() -> int:
     os.environ["TMP"] = str(scratch)
     os.environ["HOME"] = str(scratch)
     os.environ["TZ"] = "UTC"
+    # The scientific worker is headless. Without this, MuJoCo's rendering module imports
+    # PyGLFW, whose version check spawns a second Python process; under the Landlock
+    # allowlist that helper cannot read the source venv's pyvenv.cfg and exits noisily.
+    # Disabling the GL backend removes the helper entirely and does not change physics.
+    os.environ["MUJOCO_GL"] = "disable"
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     os.environ["PYTHONIOENCODING"] = "utf-8"
     os.environ["PYTHONNOUSERSITE"] = "1"

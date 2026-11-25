@@ -54,6 +54,11 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
     pinned = load_reference_observation()
     pinned_trajectory = str(pinned["trajectory_sha256"])
     pinned_model = str(pinned["model_sha256"])
+    windows_token = windows.external_isolation.get("token")
+    windows_token_fields: dict[str, object] = (
+        windows_token if isinstance(windows_token, dict) else {}
+    )
+    windows_capability_count = windows_token_fields.get("capability_count")
 
     def qualified(observation: SupervisorObservation) -> bool:
         value = observation.numerical_reference
@@ -176,6 +181,12 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
             ["windows-appcontainer", True],
         ),
         _check(
+            "windows_token_no_capabilities",
+            isinstance(windows_capability_count, int) and windows_capability_count == 0,
+            windows_token,
+            "an AppContainer token with zero package capabilities",
+        ),
+        _check(
             "linux_landlock",
             linux.profile.mechanism == "linux-landlock"
             and linux_checks.get("external_proc_facts", False),
@@ -185,14 +196,14 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
         _check(
             "linux_seccomp",
             linux.profile.network_mechanism == "linux-landlock-tcp+seccomp"
-            and linux_checks.get("network_udp_denied", False)
+            and linux_checks.get("network_udp_not_delivered", False)
             and linux_checks.get("network_unix_denied", False)
             and linux_checks.get("network_raw_denied", False)
             and linux_checks.get("network_socketpair_denied", False)
             and linux_checks.get("seccomp_io_uring_denied", False),
             [
                 linux.profile.network_mechanism,
-                linux_checks.get("network_udp_denied"),
+                linux_checks.get("network_udp_not_delivered"),
                 linux_checks.get("network_unix_denied"),
                 linux_checks.get("network_raw_denied"),
                 linux_checks.get("network_socketpair_denied"),
@@ -219,14 +230,26 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
         _check(
             "windows_scratch_bounded",
             windows.profile.scratch_limit_enforcement
-            in {"dedicated-filesystem", "sampled-watchdog"},
-            windows.profile.scratch_limit_enforcement,
+            in {"dedicated-filesystem", "sampled-watchdog"}
+            and windows_checks.get("scratch_headroom", False)
+            and windows_checks.get("scratch_within_limit", False),
+            [
+                windows.profile.scratch_limit_enforcement,
+                windows_checks.get("scratch_headroom"),
+                windows_checks.get("scratch_within_limit"),
+            ],
             "a dedicated filesystem or a sampled watchdog, never post-exit only",
         ),
         _check(
             "linux_scratch_dedicated",
-            linux.profile.scratch_limit_enforcement == "dedicated-filesystem",
-            linux.profile.scratch_limit_enforcement,
+            linux.profile.scratch_limit_enforcement == "dedicated-filesystem"
+            and linux_checks.get("scratch_headroom", False)
+            and linux_checks.get("scratch_within_limit", False),
+            [
+                linux.profile.scratch_limit_enforcement,
+                linux_checks.get("scratch_headroom"),
+                linux_checks.get("scratch_within_limit"),
+            ],
             "the host-provisioned dedicated 64 MiB filesystem used by the qualified run",
         ),
         _check(
@@ -236,6 +259,16 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
             [
                 windows_checks.get("input_view_unchanged"),
                 linux_checks.get("input_view_unchanged"),
+            ],
+            [True, True],
+        ),
+        _check(
+            "network_canary_control",
+            windows_checks.get("network_canary_control", False)
+            and linux_checks.get("network_canary_control", False),
+            [
+                windows_checks.get("network_canary_control"),
+                linux_checks.get("network_canary_control"),
             ],
             [True, True],
         ),

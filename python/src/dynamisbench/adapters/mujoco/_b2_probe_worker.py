@@ -544,6 +544,10 @@ def _run_materialized(
     from dynamisbench.adapters.mujoco import reference
     from dynamisbench.adapters.mujoco._b2_probe_common import ProbePolicyError
 
+    # The protected worker is headless. This is also set by the generated bootstrap before
+    # any scientific import; setting it here keeps a direct worker invocation headless too.
+    # It prevents MuJoCo's PyGLFW import from spawning a helper Python process.
+    os.environ["MUJOCO_GL"] = "disable"
     if view.asset_sha256 != reference.MODEL_SHA256:
         raise ProbePolicyError("the input-view model is not the reviewed reference XML")
     from dynamisbench.adapters.mujoco._b2_probe_common import reconstruct_implementation_digest

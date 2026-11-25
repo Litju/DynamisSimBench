@@ -127,6 +127,9 @@ def test_the_real_pinned_worker_consumes_the_verified_materialized_model(
         assert observation.profile.scratch_limit_enforcement == "dedicated-filesystem"
     assert observation.runtime_matches is True
     assert observation.source_runtime.digest == observation.snapshot_runtime.digest
+    stderr_excerpt = str(observation.process["stderr_excerpt"])
+    assert "pyvenv.cfg" not in stderr_excerpt
+    assert any(check["name"] == "headless_gl" and check["passed"] for check in observation.checks)
     assert observation.receipt is not None
     receipt = observation.receipt
     assert receipt.completed is True

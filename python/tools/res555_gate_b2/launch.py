@@ -35,6 +35,7 @@ from tools.res555_gate_b2.scratch import (
     ScratchWatchdog,
     measure_scratch,
     resolve_scratch_budget,
+    scratch_headroom,
 )
 from tools.res555_gate_b2.view import build_input_view
 
@@ -119,6 +120,8 @@ def consume_attempt(runtime: ProtectedRuntime, nonce: str, binding_sha256: str) 
         raise ProtectedLaunchError("this binding was already used") from error
     with os.fdopen(descriptor, "wb") as handle:
         handle.write(binding_sha256.encode("ascii"))
+        handle.flush()
+        os.fsync(handle.fileno())
     return marker
 
 
@@ -215,6 +218,7 @@ class _NetworkCanary:
         self.accepted = 0
         self.udp_received = 0
         self.unix_accepted = 0
+        self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -223,6 +227,76 @@ class _NetworkCanary:
     def unix_path(self) -> str | None:
         return None if self._unix_path is None else str(self._unix_path)
 
+    @property
+    def tcp_connections(self) -> int:
+        return self._count("accepted")
+
+    @property
+    def udp_datagrams(self) -> int:
+        return self._count("udp_received")
+
+    @property
+    def unix_connections(self) -> int:
+        return self._count("unix_accepted")
+
+    def _count(self, name: str) -> int:
+        with self._lock:
+            return int(getattr(self, name))
+
+    def _wait_for(self, name: str, target: int, timeout: float = 2.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._count(name) >= target:
+                return True
+            time.sleep(0.01)
+        return self._count(name) >= target
+
+    def _reset(self, name: str) -> None:
+        with self._lock:
+            setattr(self, name, 0)
+
+    def self_check(self) -> dict[str, bool]:
+        """Prove each active canary can receive before the worker is launched.
+
+        A zero worker count is meaningful only if the same listener demonstrably received a
+        control connection or datagram from the supervisor. The control traffic is counted,
+        confirmed and then reset so it cannot be mistaken for worker traffic.
+        """
+        results: dict[str, bool] = {}
+        try:
+            with socket.create_connection(("127.0.0.1", self.port), timeout=1.0):
+                pass
+            results["tcp"] = self._wait_for("accepted", 1)
+        except OSError:
+            results["tcp"] = False
+        finally:
+            self._reset("accepted")
+
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.sendto(b"RES555-CANARY-CONTROL", ("127.0.0.1", self.udp_port))
+        finally:
+            probe.close()
+        results["udp"] = self._wait_for("udp_received", 1)
+        self._reset("udp_received")
+
+        # AF_UNIX is absent from some Windows socket builds; the path is None there.
+        unix_family = getattr(socket, "AF_UNIX", None)  # noqa: B009
+        if self._unix_path is not None and unix_family is not None:
+            control = socket.socket(unix_family, socket.SOCK_STREAM)
+            try:
+                control.connect(str(self._unix_path))
+            except OSError:
+                results["unix"] = False
+            else:
+                results["unix"] = self._wait_for("unix_accepted", 1)
+            finally:
+                control.close()
+                self._reset("unix_accepted")
+        else:
+            results["unix"] = True
+        return results
+
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
@@ -230,7 +304,8 @@ class _NetworkCanary:
             except (TimeoutError, OSError):
                 pass
             else:
-                self.accepted += 1
+                with self._lock:
+                    self.accepted += 1
                 try:
                     connection.close()
                 except OSError:
@@ -240,14 +315,16 @@ class _NetworkCanary:
             except (TimeoutError, OSError):
                 pass
             else:
-                self.udp_received += 1
+                with self._lock:
+                    self.udp_received += 1
             if self._unix is not None:
                 try:
                     connection, _ = self._unix.accept()
                 except (TimeoutError, OSError):
                     pass
                 else:
-                    self.unix_accepted += 1
+                    with self._lock:
+                        self.unix_accepted += 1
                     try:
                         connection.close()
                     except OSError:
@@ -274,6 +351,7 @@ def _check(name: str, passed: bool, observed: object, limit: object) -> dict[str
 def _environment(scratch: Path) -> dict[str, str]:
     values = {
         "DYNAMISBENCH_RES555_B2_PROBE": "1",
+        "MUJOCO_GL": "disable",
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONHASHSEED": "0",
         "PYTHONIOENCODING": "utf-8",
@@ -352,6 +430,7 @@ def _environment_policy(scratch: Path) -> tuple[set[str], set[str]]:
     required = {
         "DYNAMISBENCH_RES555_B2_PROBE",
         "HOME",
+        "MUJOCO_GL",
         "PYTHONDONTWRITEBYTECODE",
         "PYTHONIOENCODING",
         "PYTHONNOUSERSITE",
@@ -456,10 +535,10 @@ def _terminate(
     return reaped, cleaned
 
 
-def _scratch_usage(scratch: Path) -> tuple[int, int, int]:
+def _scratch_usage(scratch: Path) -> tuple[int, int, int, int]:
     """Compatibility wrapper around the exact post-exit scratch measurement."""
     usage = measure_scratch(scratch)
-    return usage.bytes, usage.files, usage.links
+    return usage.bytes, usage.files, usage.links, usage.unmeasured
 
 
 def _create_sentinel(root: Path, token: str, *, create_root: bool) -> Path:
@@ -616,6 +695,23 @@ def run_protected_probe(
     if attempt.exists():
         raise ProtectedLaunchError("the attempt directory already exists")
     scratch.mkdir(parents=True)
+    try:
+        scratch_available = scratch_headroom(scratch)
+    except ScratchBudgetError as error:
+        raise ProtectedLaunchError(f"the scratch volume is not measurable: {error}") from error
+    # A dedicated mount is already capacity-bounded; require half of the bound free so a
+    # nearly-full mount cannot start a doomed run. A shared volume is not capacity-bounded,
+    # so require twice the bound before allowing the sampled watchdog to cover the attempt.
+    headroom_required = (
+        max(1, isolation.max_scratch_bytes // 2)
+        if scratch_budget.enforcement == "dedicated-filesystem"
+        else isolation.max_scratch_bytes * 2
+    )
+    if scratch_available < headroom_required:
+        raise ProtectedLaunchError(
+            "the scratch volume cannot absorb the configured bound before launch: "
+            f"{scratch_available} < {headroom_required} bytes"
+        )
     build_input_view(inputs, workspace, prepared, binding)
     if view_tamper is not None:
         view_tamper(inputs)
@@ -665,6 +761,12 @@ def run_protected_probe(
             )
         runtime_write = runtime.source_root / "dynamisbench" / f"res555-b2-write-{token}.txt"
         canary = _NetworkCanary()
+        network_control = canary.self_check()
+        if not all(network_control.values()):
+            raise ProtectedLaunchError(
+                "the supervisor's localhost canaries did not receive their control traffic; "
+                "a zero worker count would not be interpretable"
+            )
         try:
             targets = ProbeTargets(
                 forbidden_reads=tuple(str(path) for path in sentinels),
@@ -812,6 +914,7 @@ def run_protected_probe(
                     "proc": {},
                     "cgroup": cgroup.observe().as_json(),
                 }
+            external["network_control"] = network_control
 
             def _on_scratch_overrun(_usage: ScratchUsage) -> None:
                 if cgroup is not None:
@@ -923,12 +1026,16 @@ def run_protected_probe(
 
             usage = measure_scratch(scratch)
             scratch_bytes, scratch_files, scratch_links = usage.bytes, usage.files, usage.links
+            scratch_unmeasured = usage.unmeasured
             capacity_ok = (
                 scratch_budget.capacity_bytes is None
                 or scratch_bytes <= scratch_budget.capacity_bytes
             )
             scratch_ok = (
-                scratch_bytes <= isolation.max_scratch_bytes and scratch_links == 0 and capacity_ok
+                scratch_bytes <= isolation.max_scratch_bytes
+                and scratch_links == 0
+                and scratch_unmeasured == 0
+                and capacity_ok
             )
             if cgroup is not None:
                 cgroup_observation = cgroup.observe().as_json()
@@ -1007,9 +1114,12 @@ def run_protected_probe(
             if receipt is not None:
                 receipt_checks = {
                     "receipt_completed": (receipt.completed, True),
+                    "receipt_failure_absent": (receipt.failure, None),
+                    "receipt_run_id": (receipt.run_id, str(request.run_id)),
                     "receipt_nonce": (receipt.attempt_nonce, binding.launch_nonce),
                     "receipt_binding": (receipt.binding_sha256, binding_digest),
                     "receipt_request": (receipt.request_sha256, binding.request_sha256),
+                    "receipt_preflight": (receipt.preflight_sha256, binding.preflight_sha256),
                     "receipt_manifest": (
                         receipt.input_manifest_sha256,
                         binding.input_manifest_sha256,
@@ -1017,6 +1127,14 @@ def run_protected_probe(
                     "receipt_fingerprint": (
                         receipt.execution_fingerprint,
                         request.execution_fingerprint.hex,
+                    ),
+                    "receipt_environment": (
+                        receipt.environment_sha256,
+                        binding.environment_sha256,
+                    ),
+                    "receipt_worker_selection": (
+                        receipt.worker_selection_sha256,
+                        binding.worker_selection_sha256,
                     ),
                     "receipt_runtime": (receipt.runtime_closure_sha256, runtime.snapshot.digest),
                     "receipt_profile": (
@@ -1078,30 +1196,42 @@ def run_protected_probe(
                 checks.append(
                     _check(
                         "network_tcp_denied",
-                        canary.accepted == 0
+                        canary.tcp_connections == 0
                         and tcp_probe is not None
                         and tcp_probe.observed == "denied",
                         {
-                            "canary_connections": canary.accepted,
+                            "canary_connections": canary.tcp_connections,
                             "worker": None if tcp_probe is None else tcp_probe.observed,
+                            "canary_control": network_control.get("tcp"),
                         },
                         "zero localhost connections and a denied connect",
                     )
                 )
                 checks.append(
                     _check(
-                        "network_udp_denied",
-                        canary.udp_received == 0
+                        "network_udp_not_delivered",
+                        canary.udp_datagrams == 0
                         and (
                             os.name == "nt"
                             or (udp_probe is not None and udp_probe.observed == "denied")
                         ),
                         {
-                            "canary_datagrams": canary.udp_received,
+                            "canary_datagrams": canary.udp_datagrams,
                             "worker": None if udp_probe is None else udp_probe.observed,
+                            "canary_control": network_control.get("udp"),
                         },
-                        "zero localhost datagrams and, on Linux, a denied UDP socket; the "
-                        "Windows sendto result alone is not delivery evidence",
+                        "zero localhost datagrams after a successful canary control; on Linux the "
+                        "worker's UDP socket is denied as well; on Windows a successful sendto "
+                        "is recorded but is not delivery evidence, and this is not a universal "
+                        "UDP-denial claim",
+                    )
+                )
+                checks.append(
+                    _check(
+                        "network_canary_control",
+                        all(network_control.values()),
+                        network_control,
+                        "each active localhost canary received the supervisor's control traffic",
                     )
                 )
                 checks.append(
@@ -1122,9 +1252,10 @@ def run_protected_probe(
                         "network_unix_denied",
                         unix_probe is not None
                         and (unix_probe.observed == "denied" or unix_unavailable)
-                        and canary.unix_accepted == 0,
+                        and canary.unix_connections == 0,
                         {
-                            "canary_connections": canary.unix_accepted,
+                            "canary_connections": canary.unix_connections,
+                            "canary_control": network_control.get("unix"),
                             "worker": None if unix_probe is None else unix_probe.observed,
                             "worker_detail": None if unix_probe is None else unix_probe.detail,
                         },
@@ -1256,13 +1387,17 @@ def run_protected_probe(
             checks.append(
                 _check(
                     "network_denied",
-                    canary.accepted == 0 and canary.udp_received == 0 and canary.unix_accepted == 0,
+                    canary.tcp_connections == 0
+                    and canary.udp_datagrams == 0
+                    and canary.unix_connections == 0,
                     {
-                        "tcp_connections": canary.accepted,
-                        "udp_datagrams": canary.udp_received,
-                        "unix_connections": canary.unix_accepted,
+                        "tcp_connections": canary.tcp_connections,
+                        "udp_datagrams": canary.udp_datagrams,
+                        "unix_connections": canary.unix_connections,
+                        "canary_control": network_control,
                     },
-                    "zero localhost TCP connections, UDP datagrams and Unix-domain connections",
+                    "zero worker localhost TCP connections, UDP datagrams and Unix-domain "
+                    "connections after each active canary received its control traffic",
                 )
             )
             checks.append(
@@ -1273,11 +1408,24 @@ def run_protected_probe(
                         "bytes": scratch_bytes,
                         "files": scratch_files,
                         "links": scratch_links,
+                        "unmeasured": scratch_unmeasured,
                         "limit_bytes": isolation.max_scratch_bytes,
                         "backend": scratch_budget.enforcement,
                         "capacity_bytes": scratch_budget.capacity_bytes,
+                        "available_bytes": scratch_available,
                     },
                     scratch_budget.detail,
+                )
+            )
+            checks.append(
+                _check(
+                    "scratch_headroom",
+                    scratch_available >= headroom_required,
+                    {
+                        "available_bytes": scratch_available,
+                        "required_bytes": headroom_required,
+                    },
+                    "the scratch volume can absorb the configured bound",
                 )
             )
             if scratch_watchdog is not None:
@@ -1289,6 +1437,8 @@ def run_protected_probe(
                             "triggered": scratch_watchdog.triggered,
                             "peak_bytes": scratch_watchdog.peak_bytes,
                             "samples": scratch_watchdog.samples,
+                            "unmeasured_samples": scratch_watchdog.unmeasured_samples,
+                            "peak_unmeasured": scratch_watchdog.peak_unmeasured,
                         },
                         "a sampled watchdog that observed no over-budget write",
                     )
@@ -1297,6 +1447,8 @@ def run_protected_probe(
                     "triggered": scratch_watchdog.triggered,
                     "peak_bytes": scratch_watchdog.peak_bytes,
                     "samples": scratch_watchdog.samples,
+                    "unmeasured_samples": scratch_watchdog.unmeasured_samples,
+                    "peak_unmeasured": scratch_watchdog.peak_unmeasured,
                     "interval_seconds": scratch_watchdog.interval_seconds,
                 }
             unexpected_writes = [str(path) for path in forbidden_writes if path.exists()]
@@ -1326,10 +1478,13 @@ def run_protected_probe(
                     _check(
                         "external_appcontainer",
                         bool(token_observation.get("is_appcontainer"))
-                        and bool(token_observation.get("sid_matches")),
+                        and bool(token_observation.get("sid_matches"))
+                        and int(token_observation.get("capability_count", -1)) == 0,
                         token_observation,
-                        "an appcontainer token with the expected package SID; elevation is "
-                        "recorded but the package-SID restriction is the isolation fact",
+                        "an appcontainer token with the expected package SID and zero package "
+                        "capabilities; elevation and privileges are recorded, not claimed "
+                        "absent, and a production launch must not rely on the elevated CI "
+                        "principal as its isolation fact",
                     )
                 )
             else:
@@ -1417,6 +1572,20 @@ def run_protected_probe(
             )
             checks.append(
                 _check(
+                    "headless_gl",
+                    "MUJOCO_GL" in observed_keys
+                    and b"pyvenv.cfg" not in stderr_bytes
+                    and b"GLFW" not in stderr_bytes,
+                    {
+                        "mujoco_gl": "MUJOCO_GL" in observed_keys,
+                        "stderr_has_venv_error": b"pyvenv.cfg" in stderr_bytes,
+                        "stderr_has_glfw_error": b"GLFW" in stderr_bytes,
+                    },
+                    "the headless worker starts no GLFW helper and has no venv config error",
+                )
+            )
+            checks.append(
+                _check(
                     "sandbox_ready_binding",
                     isinstance(ready, dict)
                     and ready.get("profile_sha256") == isolation.digest()
@@ -1477,8 +1646,10 @@ def run_protected_probe(
                         "bytes": scratch_bytes,
                         "files": scratch_files,
                         "links": scratch_links,
+                        "unmeasured": scratch_unmeasured,
                         "limit_bytes": isolation.max_scratch_bytes,
                         "capacity_bytes": scratch_budget.capacity_bytes,
+                        "available_bytes": scratch_available,
                         "backend": scratch_budget.enforcement,
                         "detail": scratch_budget.detail,
                         "within_limit": scratch_ok,
@@ -1491,6 +1662,8 @@ def run_protected_probe(
                         "triggered": scratch_watchdog.triggered,
                         "peak_bytes": scratch_watchdog.peak_bytes,
                         "samples": scratch_watchdog.samples,
+                        "unmeasured_samples": scratch_watchdog.unmeasured_samples,
+                        "peak_unmeasured": scratch_watchdog.peak_unmeasured,
                         "interval_seconds": scratch_watchdog.interval_seconds,
                     },
                 },
