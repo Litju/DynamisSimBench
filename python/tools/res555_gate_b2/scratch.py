@@ -46,6 +46,7 @@ __all__ = [
     "ScratchWatchdog",
     "measure_scratch",
     "resolve_scratch_budget",
+    "scratch_headroom",
 ]
 
 ScratchEnforcement = Literal[
@@ -64,15 +65,22 @@ class ScratchBudgetError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ScratchUsage:
-    """The post-exit measurement of one scratch tree."""
+    """One measurement of a scratch tree.
+
+    ``links`` counts objects that are not one regular single-link file. ``unmeasured``
+    counts entries that could not be inspected during a live, best-effort watchdog sample.
+    The post-exit acceptance measurement is fail-closed: an unmeasurable entry is a refusal,
+    never an undercount.
+    """
 
     bytes: int
     files: int
     links: int
+    unmeasured: int = 0
 
     @property
     def acceptable(self) -> bool:
-        return self.links == 0
+        return self.links == 0 and self.unmeasured == 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +92,7 @@ class ScratchBudget:
     capacity_bytes: int | None
     detail: str
     watchdog_interval_seconds: float | None = None
+    available_bytes: int | None = None
 
 
 def _mount_for(path: Path) -> tuple[Path, str] | None:
@@ -142,16 +151,18 @@ def _linux_budget(root: Path, max_bytes: int) -> ScratchBudget:
         )
     if not os.access(root, os.W_OK | os.X_OK):
         raise ScratchBudgetError("the dedicated scratch mount is not writable")
+    available = int(info.f_bavail) * int(info.f_frsize)
     return ScratchBudget(
         root=root,
         enforcement="dedicated-filesystem",
         capacity_bytes=total,
         detail=f"{mount_point} is a {fstype} mount with a {total}-byte capacity",
+        available_bytes=available,
     )
 
 
-def _windows_volume(path: Path) -> tuple[str, int, str]:
-    """Return ``(volume_path, total_bytes, filesystem_name)`` for one Windows path."""
+def _windows_volume(path: Path) -> tuple[str, int, int, str]:
+    """Return ``(volume_path, total_bytes, available_bytes, filesystem_name)``."""
     kernel32: Any = cast(Any, ctypes).windll.kernel32
     volume = ctypes.create_unicode_buffer(261)
     if not kernel32.GetVolumePathNameW(str(path), volume, len(volume)):
@@ -179,11 +190,11 @@ def _windows_volume(path: Path) -> tuple[str, int, str]:
         len(filesystem),
     ):
         filesystem.value = "unknown"
-    return volume.value, int(total.value), filesystem.value
+    return volume.value, int(total.value), int(available.value), filesystem.value
 
 
 def _windows_budget(root: Path, max_bytes: int) -> ScratchBudget:
-    volume_path, total, filesystem = _windows_volume(root)
+    volume_path, total, available, filesystem = _windows_volume(root)
     if os.path.normcase(os.path.abspath(str(root))) != os.path.normcase(volume_path):
         raise ScratchBudgetError(
             "the requested Windows scratch root is not a dedicated volume root; a directory "
@@ -209,6 +220,7 @@ def _windows_budget(root: Path, max_bytes: int) -> ScratchBudget:
         enforcement="dedicated-filesystem",
         capacity_bytes=total,
         detail=f"{volume_path} is a {filesystem} volume with a {total}-byte capacity",
+        available_bytes=available,
     )
 
 
@@ -268,22 +280,100 @@ def resolve_scratch_budget(
     )
 
 
-def measure_scratch(scratch: Path) -> ScratchUsage:
-    """Measure exact bytes, regular files and unmeasurable link objects after exit.
+class _Win32FindStreamData(ctypes.Structure):
+    _fields_ = [
+        ("stream_size", ctypes.c_longlong),
+        ("stream_name", ctypes.c_wchar * 296),
+    ]
 
-    An entry the supervisor cannot measure is counted as a link object, so the acceptance
-    check ``links == 0`` fails closed instead of silently undercounting unreadable bytes.
+
+_INVALID_HANDLE: Final = (1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1
+
+
+def _windows_stream_bytes(path: Path, logical_size: int) -> int:
+    """Return the allocated logical size of every NTFS stream on one file.
+
+    ``os.stat().st_size`` names only the unnamed ``:$DATA`` stream. A worker can write an
+    arbitrarily large alternate data stream to a small-looking file, so the scratch
+    measurement must enumerate the streams instead of trusting the default-stream size.
+    A host or filesystem that does not support stream enumeration falls back to the
+    ordinary size; the post-exit check remains fail-closed for links and unmeasured entries.
+    """
+    kernel32: Any = cast(Any, ctypes).windll.kernel32
+    kernel32.FindFirstStreamW.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_int,
+        ctypes.POINTER(_Win32FindStreamData),
+        ctypes.c_uint32,
+    ]
+    kernel32.FindFirstStreamW.restype = ctypes.c_void_p
+    kernel32.FindNextStreamW.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(_Win32FindStreamData),
+    ]
+    kernel32.FindNextStreamW.restype = ctypes.c_int
+    kernel32.FindClose.argtypes = [ctypes.c_void_p]
+    kernel32.FindClose.restype = ctypes.c_int
+    data = _Win32FindStreamData()
+    handle = kernel32.FindFirstStreamW(str(path), 0, ctypes.byref(data), 0)
+    handle_value = int(handle) if handle is not None else 0
+    if handle_value == 0 or handle_value == int(_INVALID_HANDLE):
+        return logical_size
+    total = 0
+    try:
+        while True:
+            total += max(0, int(data.stream_size))
+            if not kernel32.FindNextStreamW(handle, ctypes.byref(data)):
+                break
+    finally:
+        kernel32.FindClose(handle)
+    return max(logical_size, total)
+
+
+def scratch_headroom(path: Path) -> int:
+    """Return the writable free bytes of the volume containing ``path``.
+
+    This is a pre-launch capacity observation, not a quota. It prevents a probe from
+    starting when the host cannot absorb the configured scratch bound even once.
+    """
+    if os.name == "nt":
+        _volume, _total, available, _filesystem = _windows_volume(path)
+        return available
+    statvfs = getattr(os, "statvfs", None)
+    if statvfs is None:
+        raise ScratchBudgetError("the scratch volume free space is not readable")
+    try:
+        info = statvfs(path)
+    except OSError as error:
+        raise ScratchBudgetError("the scratch volume free space is not readable") from error
+    return int(info.f_bavail) * int(info.f_frsize)
+
+
+def measure_scratch(scratch: Path, *, fail_closed: bool = True) -> ScratchUsage:
+    """Measure exact bytes, regular files and unmeasurable link objects.
+
+    ``fail_closed`` is the post-exit acceptance rule: an entry the supervisor cannot measure
+    is counted as a link object, so ``links == 0`` refuses instead of silently undercounting
+    unreadable bytes. The live watchdog uses ``fail_closed=False`` because a file being
+    created or atomically renamed can disappear between the directory scan and the stat; a
+    single transient observation must not kill a healthy worker. Actual links, reparse
+    points, hard links, special files and oversized content still fail in both modes, and
+    the final post-exit measurement is always fail-closed.
     """
     total = 0
     files = 0
     links = 0
+    unmeasured = 0
     pending = [scratch]
     while pending:
         current = pending.pop()
         try:
             entries = list(os.scandir(current))
         except OSError:
-            links += 1
+            if fail_closed:
+                links += 1
+            else:
+                unmeasured += 1
             continue
         for entry in entries:
             path = Path(entry.path)
@@ -302,13 +392,22 @@ def measure_scratch(scratch: Path) -> ScratchUsage:
                 elif stat.S_ISDIR(info.st_mode):
                     pending.append(path)
                 elif stat.S_ISREG(info.st_mode):
-                    total += info.st_size
+                    if info.st_nlink != 1:
+                        links += 1
+                        continue
+                    size = info.st_size
+                    if os.name == "nt":
+                        size = _windows_stream_bytes(path, size)
+                    total += size
                     files += 1
                 else:
                     links += 1
             except OSError:
-                links += 1
-    return ScratchUsage(bytes=total, files=files, links=links)
+                if fail_closed:
+                    links += 1
+                else:
+                    unmeasured += 1
+    return ScratchUsage(bytes=total, files=files, links=links, unmeasured=unmeasured)
 
 
 @dataclass
@@ -322,6 +421,8 @@ class ScratchWatchdog:
     triggered: bool = False
     peak_bytes: int = 0
     samples: int = 0
+    unmeasured_samples: int = 0
+    peak_unmeasured: int = 0
     last_usage: ScratchUsage | None = None
     _stop: threading.Event = field(default_factory=threading.Event, repr=False)
     _thread: threading.Thread | None = field(default=None, repr=False)
@@ -336,10 +437,13 @@ class ScratchWatchdog:
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            usage = measure_scratch(self.root)
+            usage = measure_scratch(self.root, fail_closed=False)
             self.samples += 1
             self.last_usage = usage
             self.peak_bytes = max(self.peak_bytes, usage.bytes)
+            self.peak_unmeasured = max(self.peak_unmeasured, usage.unmeasured)
+            if usage.unmeasured:
+                self.unmeasured_samples += 1
             if usage.bytes > self.limit_bytes or usage.links > 0:
                 self.triggered = True
                 try:
