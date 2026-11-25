@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Final, Literal, cast
 
 __all__ = [
+    "DEFAULT_MAX_FILES",
     "ScratchBudget",
     "ScratchBudgetError",
     "ScratchEnforcement",
@@ -56,6 +57,10 @@ ScratchEnforcement = Literal[
 ]
 
 _DEFAULT_WATCHDOG_SECONDS: Final = 0.02
+DEFAULT_MAX_FILES: Final = 256
+"""A metadata/inode bound for scratch. The pinned worker needs four files; 256 is generous
+and far below an inode-exhaustion attempt. Empty files consume metadata even when bytes stay
+small, so the byte bound alone is not an aggregate scratch-exhaustion bound."""
 _SYSTEM_VOLUME_NAMES: Final = frozenset({"System Volume Information", "$RECYCLE.BIN"})
 
 
@@ -424,6 +429,7 @@ class ScratchWatchdog:
     limit_bytes: int
     interval_seconds: float
     on_overrun: Callable[[ScratchUsage], None]
+    max_files: int = DEFAULT_MAX_FILES
     triggered: bool = False
     peak_bytes: int = 0
     samples: int = 0
@@ -450,7 +456,7 @@ class ScratchWatchdog:
             self.peak_unmeasured = max(self.peak_unmeasured, usage.unmeasured)
             if usage.unmeasured:
                 self.unmeasured_samples += 1
-            if usage.bytes > self.limit_bytes or usage.links > 0:
+            if usage.bytes > self.limit_bytes or usage.files > self.max_files or usage.links > 0:
                 self.triggered = True
                 try:
                     self.on_overrun(usage)

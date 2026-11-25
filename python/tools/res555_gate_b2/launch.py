@@ -30,6 +30,7 @@ from tools.res555_gate_b2.linux_cgroup import CgroupLimits, CgroupV2
 from tools.res555_gate_b2.profile import build_profile, mechanism_available
 from tools.res555_gate_b2.runtime import ProtectedRuntime
 from tools.res555_gate_b2.scratch import (
+    DEFAULT_MAX_FILES,
     ScratchBudgetError,
     ScratchUsage,
     ScratchWatchdog,
@@ -938,6 +939,7 @@ def run_protected_probe(
                     limit_bytes=isolation.max_scratch_bytes,
                     interval_seconds=scratch_budget.watchdog_interval_seconds or 0.02,
                     on_overrun=_on_scratch_overrun,
+                    max_files=DEFAULT_MAX_FILES,
                 )
                 scratch_watchdog.start()
 
@@ -1041,6 +1043,7 @@ def run_protected_probe(
             )
             scratch_ok = (
                 scratch_bytes <= isolation.max_scratch_bytes
+                and scratch_files <= DEFAULT_MAX_FILES
                 and scratch_links == 0
                 and scratch_unmeasured == 0
                 and capacity_ok
@@ -1415,6 +1418,7 @@ def run_protected_probe(
                         "files": scratch_files,
                         "links": scratch_links,
                         "unmeasured": scratch_unmeasured,
+                        "max_files": DEFAULT_MAX_FILES,
                         "limit_bytes": isolation.max_scratch_bytes,
                         "backend": scratch_budget.enforcement,
                         "capacity_bytes": scratch_budget.capacity_bytes,
@@ -1653,6 +1657,7 @@ def run_protected_probe(
                         "files": scratch_files,
                         "links": scratch_links,
                         "unmeasured": scratch_unmeasured,
+                        "max_files": DEFAULT_MAX_FILES,
                         "limit_bytes": isolation.max_scratch_bytes,
                         "capacity_bytes": scratch_budget.capacity_bytes,
                         "available_bytes": scratch_available,

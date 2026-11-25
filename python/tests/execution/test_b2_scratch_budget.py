@@ -64,6 +64,31 @@ def test_the_watchdog_reports_an_over_budget_write(tmp_path: Path) -> None:
     assert watchdog.peak_bytes >= 4096
 
 
+def test_the_watchdog_reports_an_over_file_budget(tmp_path: Path) -> None:
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    for index in range(5):
+        (scratch / f"empty-{index}").write_bytes(b"")
+    triggered = threading.Event()
+
+    def overrun(_usage) -> None:
+        triggered.set()
+
+    watchdog = ScratchWatchdog(
+        root=scratch,
+        limit_bytes=1024 * 1024,
+        interval_seconds=0.01,
+        on_overrun=overrun,
+        max_files=4,
+    )
+    watchdog.start()
+    try:
+        assert triggered.wait(2.0)
+    finally:
+        watchdog.stop()
+    assert watchdog.triggered
+
+
 def test_a_transient_unmeasurable_entry_is_not_a_link_in_a_live_sample(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
