@@ -263,6 +263,13 @@ def compare(windows_path: Path, linux_path: Path) -> dict[str, Any]:
             [True, True],
         ),
         _check(
+            "headless_gl",
+            windows_checks.get("headless_gl", False)
+            and linux_checks.get("headless_gl", False),
+            [windows_checks.get("headless_gl"), linux_checks.get("headless_gl")],
+            [True, True],
+        ),
+        _check(
             "network_canary_control",
             windows_checks.get("network_canary_control", False)
             and linux_checks.get("network_canary_control", False),
