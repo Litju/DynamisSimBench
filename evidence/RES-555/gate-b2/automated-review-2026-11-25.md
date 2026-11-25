@@ -305,6 +305,25 @@ caller.
   substitution refusal and late-hardlink refusal.
 - The local Windows positive and six negative tests reproduce on the review host.
 
+## Implementation status after the conditional owner decision
+
+The owner selected option A on 2026-11-25. The first correction increment is on the B2 branch
+after the review record:
+
+| Commit | Scope | Tests |
+|---|---|---|
+| `18ebfc7` | Frozen `PinnedReferenceProfile` with the accepted platform adapter digests, pinned trajectory and resource bounds; a protected bootstrap source file requiring `-I -S`, config and self digests, and fixed sandbox module paths; a production worker that calls `_verify_reference_authority` before compiling the view bytes and checks the committed trajectory | `test_protected_profile.py`, `test_protected_bootstrap.py` (16 passed local) |
+| `888e5d5` | Production scratch accounting: directories, combined entries and directory NTFS streams; entry-budget watchdog | `test_protected_scratch.py` (4 passed local, one Windows directory-stream test) |
+| `570fefc` | Production canary with a two-cycle post-exit drain | `test_protected_canary.py` (3 passed, one AF_UNIX skip on the review host) |
+
+This is not the production launcher. The following remain before activation: the production
+runtime/snapshot and `execute_preflighted` integration, the Linux venv-closure disposition
+(F7), the non-elevated Windows principal decision on the hosted runner, the stack
+reconciliation (F8/F9), the exact-head CI for the final head, and the human review. The
+worker and bootstrap still reuse the qualified B2 helper models; promoting those helpers out
+of the probe namespace is part of the launcher increment. No supervisor route, native output,
+canonicalization, assessment or seal is activated.
+
 ## What this review is not
 
 This is not the independent human security/runtime/scientific review required by RES-555.
