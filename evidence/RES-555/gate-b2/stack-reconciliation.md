@@ -22,6 +22,19 @@ exact-head `quality` run on each reconciled head is the qualification; earlier r
 historical. Merge remains blocked on the owner's explicit authorization and, for #35, the
 named human review.
 
+## Qualification record
+
+The workflow-authority repair head `6d389b9` was qualified by workflow_dispatch
+[`45814625302`](https://github.com/Litju/DynamisSimBench/actions/runs/45814625302):
+all 10 jobs succeeded, including `python (windows-x64)`, `python (linux-x64)`,
+`res555-protected-supervisor`, `res555-gate-b2-comparison` and
+`mujoco-receipt-comparison`. This is the exact-head run that closes the
+`res555-protected-supervisor` artifact-authority failure from run `45740675530`.
+
+The reconciled heads are qualified by their own runs; a run on an earlier head is not a
+qualification of a later merge commit. The run identifiers and dispositions are recorded in
+the PR check rollups and the RES-555 acceptance comment.
+
 
 ## Current protected-main ruleset
 
