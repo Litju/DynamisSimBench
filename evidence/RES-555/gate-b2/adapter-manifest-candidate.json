@@ -418,8 +418,8 @@
       "worker.py"
     ]
   },
-  "declaration": "The protected route continues to pin the accepted 10-file identity. The candidate digests are not authority until the owner records an explicit re-acceptance and a separate commit updates the profile.",
+  "declaration": "Owner conditionally accepted both 13-file schema-2 digests for the fixed MuJoCo reference on 2026-11-26. The protected supervisor verifies schema-2 in addition to the preserved protocol-v1 10-file worker identity. Human review and merge remain blocked.",
   "dependency_closure_digest": "6a2f7ad6b36c71ac3c17466934843666efe35d743502be64837bb322f8275d5c",
   "schema": "dynamisbench.res555.adapter-manifest-candidate/1",
-  "status": "requested-not-accepted"
+  "status": "owner-accepted-conditional-dual-binding"
 }

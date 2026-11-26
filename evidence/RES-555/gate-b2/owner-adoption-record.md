@@ -147,23 +147,34 @@ view.
 The owner must explicitly re-accept these digests. The B2 packet does not do so, and no
 existing acceptance is silently reused.
 
-### Candidate replacement identity (prepared 2026-11-26, not accepted)
+### Conditionally accepted 13-file production identity (2026-11-26)
 
-The 10-file identity above remains the only accepted identity. The inside-sandbox production
-worker, its shared contracts and the bootstrap are now measured by the runtime source closure
-and individually recorded, and a schema-2 candidate that binds them has been prepared for
-explicit re-acceptance:
+The owner explicitly accepted the schema-2 digests for the fixed pinned MuJoCo reference
+in [Linear RES-555](https://linear.app/alignerr-cmj/issue/RES-555/db-33-content-addressed-modeldefinition-materialization-worker-input),
+decision comment `a6712040-c29a-47c1-9cb3-d885b763743b`.
 
-| Platform | Candidate implementation digest (`.../2`) | Files |
+| Platform | Owner-accepted schema-2 SHA-256 | Files |
 |---|---|---:|
 | Windows x86-64 | `86d5e912fa876208e156bfe13f91be6a5cfde7f0aefcc9e0bbf3aedbc7051f20` | 13 |
 | Linux x86-64 | `9ea31547f2246e2a8eedcaefcac8ae767086711c96ad79d5da835f72e5bc2ea1` | 13 |
 
-The exact payload, per-file hashes and reproduction command are in
+**Exact implementation boundary:** the historical 10-file protocol-v1 adapter digest
+continues to be checked by the worker. The supervisor *additionally* validates the
+owner-accepted schema-2 digest over the ten adapter files and the three production-entry
+files (`protected_contracts.py`, `protected_worker.py`, `protected_bootstrap.py`) from
+the measured source snapshot at route construction, before execution and after exit.
+The accepted hashes and WorkerRequest/WorkerResponse v1 remain unchanged.
+
+This is a dual-binding compatibility implementation, rather than putting the schema-2
+digest directly into the v1 wire adapter identity. A named independent human reviewer
+must evaluate its equivalence to the proposed replacement contract before the owner
+authorizes PR #35 integration. The 13 bound source bytes are unchanged; modifying them
+would require a newly calculated owner decision. No production UI/API activation, native
+evidence, canonicalization, assessment or sealing is granted.
+
+The exact manifest payload and regeneration command remain in
 [`adapter-manifest-reacceptance.md`](./adapter-manifest-reacceptance.md) and
-[`adapter-manifest-candidate.json`](./adapter-manifest-candidate.json). This is a request,
-not acceptance: the protected profile still pins the 10-file digests, and no production route
-is enabled.
+[`adapter-manifest-candidate.json`](./adapter-manifest-candidate.json).
 
 ### Pinned numerical reference
 
@@ -232,9 +243,9 @@ The owner is asked to choose one:
 | Decision (A/B/C) | **A. Approve conditionally** |
 | Owner name / role | **Litju (owner), via T3 Code RES-555 decision request** |
 | Date | **2026-11-25** |
-| Linear RES-555 reference / decision comment | RES-555. This session cannot write the Linear API; the owner should paste/confirm this record in the existing issue. |
+| Linear RES-555 reference / decision comment | [RES-555](https://linear.app/alignerr-cmj/issue/RES-555/db-33-content-addressed-modeldefinition-materialization-worker-input), conditionally adopted D3/D4 `f240705a`, schema-2 acceptance `a6712040` |
 | Adapter identity re-accepted (Windows digest / Linux digest) | **Windows `4a907d4262ceca66588188ddcc37894ec488a55f0756886864c89bc5f99827b8`; Linux `7993ac96c91de71a7b5f8770d444c318d6c1283de5b8f0f0d1c615d7c6afe097`** |
-| Adapter schema-2 candidate (worker/contracts/bootstrap) accepted? | **PENDING — the request is prepared in `adapter-manifest-reacceptance.md`; the 10-file identity remains in force until this row is signed.** |
+| Adapter schema-2 production identity accepted? | **YES, CONDITIONALLY, 2026-11-26 — Windows `86d5e912fa876208e156bfe13f91be6a5cfde7f0aefcc9e0bbf3aedbc7051f20`; Linux `9ea31547f2246e2a8eedcaefcac8ae767086711c96ad79d5da835f72e5bc2ea1`. Supervisor dual-binding implementation requires named human review and qualification before merge.** |
 | Persisted supervisor record name/schema | **`protected-consumption.json` / `dynamisbench.protected-consumption/1`** (accepted conditionally; worker sidecar remains `scratch/consumption.json`) |
 | Windows production principal (non-elevated required? accepted residual?) | **Non-elevated required for production. The hosted elevated CI token remains mechanism evidence only; a non-elevated principal or an explicit residual acceptance and re-qualification is still required.** |
 | Linux delegated cgroup + dedicated scratch required? | **Yes for production.** |

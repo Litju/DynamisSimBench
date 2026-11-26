@@ -45,7 +45,7 @@ def _candidate() -> dict:
 def test_the_committed_candidate_reproduces_from_the_current_source() -> None:
     candidate = _candidate()
     source_root = Path(dynamisbench.__file__).resolve().parent.parent
-    assert candidate["status"] == "requested-not-accepted"
+    assert candidate["status"] == "owner-accepted-conditional-dual-binding"
     assert candidate["candidate_identity"]["schema"] == CANDIDATE_IDENTITY_SCHEMA
     assert candidate["candidate_identity"]["file_count"] == (
         len(reference.ADAPTER_SOURCE_FILES) + len(CANDIDATE_PRODUCTION_ENTRY_FILES)

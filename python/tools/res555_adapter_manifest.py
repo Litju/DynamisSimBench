@@ -67,7 +67,7 @@ def build_document(*, source_root: Path | None = None) -> dict[str, Any]:
     manifest = platforms[PLATFORMS[0]]["payload"]
     return {
         "schema": REQUEST_SCHEMA,
-        "status": "requested-not-accepted",
+        "status": "owner-accepted-conditional-dual-binding",
         "accepted_identity": {
             "schema": reference.IMPLEMENTATION_IDENTITY_SCHEMA,
             "digests": dict(ADAPTER_IMPLEMENTATION_DIGESTS),
@@ -84,9 +84,10 @@ def build_document(*, source_root: Path | None = None) -> dict[str, Any]:
         },
         "dependency_closure_digest": manifest["dependency_closure"]["digest"],
         "declaration": (
-            "The protected route continues to pin the accepted 10-file identity. The "
-            "candidate digests are not authority until the owner records an explicit "
-            "re-acceptance and a separate commit updates the profile."
+            "Owner conditionally accepted both 13-file schema-2 digests for the fixed "
+            "MuJoCo reference on 2026-11-26. The protected supervisor verifies schema-2 "
+            "in addition to the preserved protocol-v1 10-file worker identity. Human "
+            "review and merge remain blocked."
         ),
     }
 

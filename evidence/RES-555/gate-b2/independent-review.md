@@ -7,12 +7,9 @@ tests and automated reviews are listed separately and must not be counted as hum
 
 ## Exact material to review
 
-- Base: protected `main` at `16adf8a`.
-- Exact head: `b9b2f10` (PR #35), the corrected integration head that carries the CI repair
-  `6d389b9`, the adapter re-acceptance request `a00b3e0`, the reconciled A1 stack merge
-  `03c6238` and this packet update. A result on an earlier head is not a qualification of
-  this head. This packet update is documentation-only: the reviewed code is exactly
-  `b9b2f10`, and a later documentation commit does not change it.
+- Base: protected `main` at `ae78ae2` (A1 #31 → #32 → #34 merged and postmerge-qualified).
+- Current schema-2 **code head**: `166ca267b809fcb5a0914d9fda0b0ba99760981f` (PR #35), following the two implementation commits `a80820f` and `f5caabf` and narrowly scoped formatting corrections. A later documentation-only commit must not be called code qualification of a different head.
+- Owner acceptance: [Linear RES-555](https://linear.app/alignerr-cmj/issue/RES-555/db-33-content-addressed-modeldefinition-materialization-worker-input), `a6712040`. Human review must evaluate *both* the v1 wire digest and supervisor-checked 13-file schema-2 digest and bind an exact full Git SHA in the signed disposition.
 - A1 stack (reconciled with merge commits): PR #31 `fdb4305` → PR #32 `fbc69f7` →
   PR #34 `01a3b42`.
 - Historical B2 feature head: `47ca8d3`.
@@ -23,11 +20,8 @@ tests and automated reviews are listed separately and must not be counted as hum
 - Later qualified heads: `b2c2309` (run `45684551797`), `afb93db` (Linux protected-supervisor
   run `45740396472`) and `6d389b9` (the CI-repair head). Each is historical relative to
   `b9b2f10`.
-- The exact-head `quality` run on `b9b2f10` is the run in PR #35's check rollup; it must
-  include the eight ADR-025 checks, `res555-gate-b2-comparison`,
-  `mujoco-receipt-comparison` and `res555-protected-supervisor`.
-- Diff under review: the commits with `RES-555` in their subject added after `47ca8d3`, plus
-  the protected-main merges, the CI repair and the adapter re-acceptance request.
+- The current code-head `quality` run is [45844568858](https://github.com/Litju/DynamisSimBench/actions/runs/45844568858), including the eight ADR-025 checks, `res555-gate-b2-comparison`, `mujoco-receipt-comparison` and `res555-protected-supervisor`. A documentation-only successor needs exact-head checks before merge. Treat a run as qualified only after its actual conclusion is success.
+- Diff under review: the RES-555 commits after `47ca8d3`, including the merged A1 baseline, CI repairs, frozen production runtime, supervisor launch, v2 profile pin, v2 supervisor reconstruction and exact missing/mutated-source refusal tests. The named human reviewer must explicitly evaluate the dual v1/v2 binding semantics, same-user TOCTOU limitations and worker-authored receipt claims.
 
 ## Human review status
 
