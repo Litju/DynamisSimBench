@@ -272,6 +272,48 @@ def test_a_replayed_binding_is_refused(tmp_path: Path) -> None:
         consume_binding(route, "e" * 64, "f" * 64)
 
 
+def test_the_tree_owns_and_closes_the_platform_primitive() -> None:
+    from dynamisbench.execution.protected_launch import ProtectedTree, _ProcessLike
+
+    class FakeProcess:
+        pid = 1234
+        returncode = None
+
+        def __init__(self) -> None:
+            self.killed = False
+            self.closed = False
+
+        def poll(self) -> int | None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def close(self) -> None:
+            self.closed = True
+
+        def job_accounting(self) -> dict[str, int]:
+            return {"active_processes": 0}
+
+    process = FakeProcess()
+    tree = ProtectedTree(
+        platform="windows-x86-64",
+        process=cast("_ProcessLike", process),
+        windows_process=process,
+    )
+
+    assert tree.wait_empty(0.1) is True
+    tree.request_termination()
+    tree.close()
+
+    assert process.killed is True
+    assert process.closed is True
+    assert tree.cleanup_failed is False
+
+
 def test_a_missing_mechanism_refuses_to_build_a_route(monkeypatch: pytest.MonkeyPatch) -> None:
     if os.name == "nt":
         from dynamisbench.host import protected_windows

@@ -419,6 +419,14 @@ class ProtectedTree:
         return False
 
     def close(self) -> None:
+        if self._windows is not None:
+            try:
+                # Close the process/thread handles and the Job Object. `_terminate_and_reap`
+                # already emptied the tree; this releases the ownership primitive itself so a
+                # later attempt cannot inherit a live job or a stale handle.
+                self._windows.close()
+            except Exception:  # noqa: BLE001 - an unclosed job is reported, not hidden
+                self.cleanup_failed = True
         if self._cgroup is not None and not bool(self._cgroup.close()):
             self.cleanup_failed = True
         if self._posix is not None:
@@ -512,7 +520,19 @@ class ProtectedPlatform:
 
     def close(self) -> None:
         if self._app_container is not None:
+            from dynamisbench.host import protected_windows
+
+            folder = Path(self._app_container.folder)
             try:
+                # The attempt reduced the supervisor user to RX,DE,DC on the runtime tree.
+                # Restore full control so the snapshot can be removed, then delete the
+                # profile itself rather than leaving an orphaned package folder behind.
+                if folder.is_dir():
+                    protected_windows.restore_user_control(folder)
+            except Exception:  # noqa: BLE001 - cleanup is best effort at this boundary
+                pass
+            try:
+                shutil.rmtree(folder, ignore_errors=True)
                 self._app_container.delete()
             finally:
                 self._app_container = None
