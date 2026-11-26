@@ -855,7 +855,9 @@ def _execute_preflighted(
                 "protected execution requires a ProtectedRun built by "
                 "prepare_protected_route and prepare_execution_inputs"
             )
-        if protected.route.workspace.source_root != workspace.source_root:
+        if protected.route.workspace is not None and (
+            protected.route.workspace.source_root != workspace.source_root
+        ):
             raise protected_launch.ProtectedLaunchError(
                 RefusalCode.FORBIDDEN_PATH,
                 "the protected route belongs to a different workspace than the admission",

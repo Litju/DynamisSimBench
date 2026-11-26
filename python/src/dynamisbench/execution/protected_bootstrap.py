@@ -247,6 +247,10 @@ def main(argv: list[str] | None = None) -> int:
             bootstrap_sha256=bootstrap_sha256,
         )
         _prepare_sys_path(config)
+        # The bootstrap consumes its own two digests. The worker's entry point accepts no
+        # arguments and refuses any that reach it, so the supervisor-pinned arguments must
+        # not be visible to `protected_worker.main`.
+        sys.argv = [sys.argv[0]]
         from dynamisbench.adapters.mujoco.protected_worker import main as worker_main
 
         return worker_main()

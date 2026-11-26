@@ -16,7 +16,6 @@ from dynamisbench.adapters.mujoco.protected_contracts import (
     PhysicsObservation,
     ProbeObservation,
     RuntimeRootSummary,
-    RuntimeSummary,
     WorkerRuntimeSummary,
 )
 from dynamisbench.execution.input_binding import WorkerInputBinding
@@ -49,7 +48,7 @@ def _binding(**overrides: str) -> WorkerInputBinding:
         "launch_nonce": "4" * 64,
     }
     values.update(overrides)
-    return WorkerInputBinding(**values)
+    return WorkerInputBinding.model_validate(values)
 
 
 def _runtime_expectation(profile) -> RuntimeExpectation:
@@ -311,3 +310,56 @@ def test_a_non_linux_dedicated_scratch_is_refused(monkeypatch: pytest.MonkeyPatc
 
     with pytest.raises(ProtectedLaunchError, match="dedicated scratch"):
         platform.open()
+
+
+def test_the_pinned_profile_refuses_a_different_admitted_request(tmp_path: Path) -> None:
+    from tests.execution.support import build_fixture, preflight
+
+    fixture = build_fixture(tmp_path)
+    admission = preflight(fixture)
+    assert admission.request is not None
+    profile = build_protected_profile(reference.platform_tag())
+
+    differences = profile.authority_refusals(admission.request)
+
+    assert "adapter id" in differences
+    assert "adapter implementation digest" in differences
+    assert "environment semantic digest" in differences
+    assert profile.matches_request(admission.request) is False
+
+
+def test_the_windows_launch_environment_copies_only_named_system_values(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if os.name != "nt":
+        pytest.skip("the AppContainer environment constraint is Windows-specific")
+    from dynamisbench.execution.protected_runtime import protected_environment
+
+    monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\qualification\AppData\Local")
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\qualification")
+    monkeypatch.setenv("SUPERVISOR_SECRET", "must-not-be-passed")
+
+    environment = protected_environment(tmp_path)
+
+    assert environment["LOCALAPPDATA"] == r"C:\Users\qualification\AppData\Local"
+    assert environment["PROCESSOR_ARCHITECTURE"] == os.environ["PROCESSOR_ARCHITECTURE"]
+    assert "USERPROFILE" not in environment
+    assert "SUPERVISOR_SECRET" not in environment
+    assert environment["TEMP"] == str(tmp_path)
+    assert environment["MUJOCO_GL"] == "disable"
+
+
+def test_a_missing_local_app_data_is_a_refusal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if os.name != "nt":
+        pytest.skip("the AppContainer environment constraint is Windows-specific")
+    from dynamisbench.execution.protected_runtime import (
+        ProtectedRuntimeError,
+        protected_environment,
+    )
+
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    with pytest.raises(ProtectedRuntimeError, match="LOCALAPPDATA"):
+        protected_environment(tmp_path)

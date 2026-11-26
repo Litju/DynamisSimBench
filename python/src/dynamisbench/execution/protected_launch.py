@@ -89,6 +89,7 @@ from dynamisbench.execution.protected_profile import (
 )
 from dynamisbench.execution.protected_runtime import (
     ProtectedRuntime,
+    ProtectedRuntimeError,
     build_protected_sandbox_config,
     prepare_protected_runtime,
     protected_environment,
@@ -100,6 +101,7 @@ from dynamisbench.execution.protected_scratch import (
     ScratchBudget,
     ScratchBudgetError,
     ScratchUsage,
+    ScratchWatchdog,
     measure_scratch,
     resolve_scratch_budget,
     scratch_headroom,
@@ -519,25 +521,32 @@ class ProtectedPlatform:
             self._owned_parent = None
 
     # -- paths ----------------------------------------------------------------------
+    def _host_parent(self) -> Path:
+        """The supervisor-owned parent for a runtime snapshot or an attempt directory."""
+        if self._sandbox_parent is not None:
+            return self._sandbox_parent
+        if self._owned_parent is None:
+            self._owned_parent = Path(
+                tempfile.mkdtemp(prefix="dynamisbench-protected-attempt-")
+            ).resolve()
+        return self._owned_parent
+
     @property
     def runtime_root(self) -> Path:
-        assert self.scratch is not None and self.scratch.root is not None
         if self.windows:
             assert self._app_container is not None
             # The copied interpreter must be package-SID readable/executable; the AC folder
             # is the only tree the profile owns by construction.
             return Path(self._app_container.folder) / "runtime"
-        return self.scratch.root / "runtime"
+        return self._host_parent() / "runtime"
 
     def attempt_parent(self) -> Path:
+        # A dedicated scratch filesystem is capacity-bounded, so an attempt beneath it gets
+        # the aggregate bound. A shared volume would not, and the attempt then lives under
+        # the explicit sandbox parent instead.
         if self.scratch is not None and self.scratch.root is not None:
             return self.scratch.root
-        if self._sandbox_parent is not None:
-            return self._sandbox_parent
-        self._owned_parent = Path(
-            tempfile.mkdtemp(prefix="dynamisbench-protected-attempt-")
-        ).resolve()
-        return self._owned_parent
+        return self._host_parent()
 
     def prepare_attempt(self, attempt: Path, inputs: Path, scratch: Path) -> None:
         if not self.windows:
@@ -777,8 +786,8 @@ class ProtectedExecutionRoute:
     profile: PinnedReferenceProfile
     runtime: ProtectedRuntime
     platform: ProtectedPlatform
-    workspace: Workspace
     scratch: ScratchBudget
+    workspace: Workspace | None = None
 
     @property
     def digest(self) -> str:
@@ -804,8 +813,8 @@ class ProtectedRun:
 
 def prepare_protected_route(
     *,
-    workspace: Workspace,
     worker_python: Path,
+    workspace: Workspace | None = None,
     platform_tag: str | None = None,
     bootstrap_path: Path | None = None,
     sandbox_parent: Path | None = None,
@@ -847,8 +856,8 @@ def prepare_protected_route(
         profile=profile,
         runtime=runtime,
         platform=platform,
-        workspace=workspace,
         scratch=platform.scratch,
+        workspace=workspace,
     )
 
 
@@ -1179,6 +1188,7 @@ class ProtectedAttempt:
         self.view_after: VerifiedWorkerInputs | None = None
         self.usage: ScratchUsage | None = None
         self.trajectory: dict[str, object] = {}
+        self.watchdog: ScratchWatchdog | None = None
 
     # -- start ----------------------------------------------------------------------
     def start(self) -> tuple[_ProcessLike, ProtectedTree]:
@@ -1190,6 +1200,21 @@ class ProtectedAttempt:
         self.process = process
         self.tree = tree
         self.external_isolation = self.route.platform.external_isolation(process)
+        profile = self.route.profile
+        watchdog = ScratchWatchdog(
+            root=self.scratch,
+            limit_bytes=profile.max_scratch_bytes,
+            interval_seconds=(
+                self.route.scratch.watchdog_interval_seconds
+                if self.route.scratch.watchdog_interval_seconds is not None
+                else _POLL_SECONDS
+            ),
+            on_overrun=lambda _usage: tree.request_termination(),
+            max_files=profile.max_scratch_entries,
+            max_entries=profile.max_scratch_entries,
+        )
+        watchdog.start()
+        self.watchdog = watchdog
         return process, tree
 
     # -- observation ----------------------------------------------------------------
@@ -1315,6 +1340,8 @@ class ProtectedAttempt:
             self.canary.close()
         except Exception:  # noqa: BLE001 - cleanup is best effort at this boundary
             pass
+        if self.watchdog is not None:
+            self.watchdog.stop()
         if self.tree is not None:
             try:
                 self.tree.close()
@@ -1610,6 +1637,8 @@ class ProtectedAttempt:
         self, checks: list[dict[str, object]], refusals: list[Refusal]
     ) -> ScratchUsage:
         profile = self.route.profile
+        if self.watchdog is not None:
+            self.watchdog.stop()
         try:
             usage = measure_scratch(self.scratch)
         except Exception as error:  # noqa: BLE001
@@ -1644,6 +1673,13 @@ class ProtectedAttempt:
                 refusal(
                     RefusalCode.WORKER_FAILED,
                     "the protected worker exceeded or obfuscated its scratch budget",
+                )
+            )
+        if self.watchdog is not None and self.watchdog.triggered:
+            refusals.append(
+                refusal(
+                    RefusalCode.WORKER_FAILED,
+                    "the sampled scratch watchdog terminated an over-budget worker",
                 )
             )
         return usage
@@ -1787,6 +1823,11 @@ class ProtectedAttempt:
                 "entries": usage.entries,
                 "links": usage.links,
                 "enforcement": self.route.scratch.enforcement,
+                "watchdog": {
+                    "samples": 0 if self.watchdog is None else self.watchdog.samples,
+                    "triggered": bool(self.watchdog is not None and self.watchdog.triggered),
+                    "peak_bytes": 0 if self.watchdog is None else self.watchdog.peak_bytes,
+                },
             },
             process={
                 "exit_code": exit_code,
@@ -1919,8 +1960,16 @@ def begin_protected_attempt(
             "the scratch volume cannot absorb the configured bound before launch",
         )
 
-    write_protected_input_view(inputs, workspace, prepared, binding)
-    pre_view = verify_worker_input_view(inputs, expected=binding, request=request)
+    try:
+        write_protected_input_view(inputs, workspace, prepared, binding)
+        pre_view = verify_worker_input_view(inputs, expected=binding, request=request)
+    except Exception as error:  # noqa: BLE001 - an unusable view is a refusal, not a crash
+        shutil.rmtree(attempt, ignore_errors=True)
+        raise ProtectedLaunchError(
+            RefusalCode.FORBIDDEN_PATH,
+            "the protected input view could not be composed from the admitted objects: "
+            f"{type(error).__name__}",
+        ) from error
 
     token = uuid.uuid4().hex
     staging = workspace.location(PersistenceClass.STAGING).path
@@ -1935,11 +1984,14 @@ def begin_protected_attempt(
     ):
         if root.is_dir():
             sentinels.append(_create_sentinel(root, token))
-    forbidden_writes = (
-        inputs / "forbidden-write.txt",
-        staging / f"dynamisbench-protected-write-{token}.txt",
-        sealed / f"dynamisbench-protected-write-{token}.txt",
-    )
+    # A workspace's sealed root is deliberately absent until a run is sealed, so a write
+    # target that does not exist is not part of this attempt's attack surface. Probing a
+    # missing directory would report "error", and calling that a denial would be dishonest.
+    forbidden_writes: list[Path] = [inputs / "forbidden-write.txt"]
+    for root in (staging, sealed):
+        if root.is_dir():
+            forbidden_writes.append(root / f"dynamisbench-protected-write-{token}.txt")
+    forbidden_write_targets = tuple(forbidden_writes)
     runtime_write = runtime.source_root / "dynamisbench" / f"protected-write-{token}.txt"
 
     canary = ProtectedNetworkCanary()
@@ -1956,7 +2008,7 @@ def begin_protected_attempt(
     try:
         targets = ProbeTargets(
             forbidden_reads=tuple(str(path) for path in sentinels),
-            forbidden_writes=tuple(str(path) for path in forbidden_writes),
+            forbidden_writes=tuple(str(path) for path in forbidden_write_targets),
             forbidden_deletes=(str(inputs / "binding.json"),),
             allowed_read=str(inputs / "binding.json"),
             allowed_write=str(scratch / "probe-write.txt"),
@@ -1987,6 +2039,10 @@ def begin_protected_attempt(
             config_sha256=sandbox_digest,
             bootstrap_sha256=profile.bootstrap_sha256,
         )
+        try:
+            environment = protected_environment(scratch)
+        except ProtectedRuntimeError as error:
+            raise ProtectedLaunchError(RefusalCode.WORKER_START_FAILED, str(error)) from error
     except BaseException:
         canary.close()
         for sentinel in sentinels:
@@ -2008,9 +2064,9 @@ def begin_protected_attempt(
         sandbox_digest=sandbox_digest,
         canary=canary,
         probe_targets=targets,
-        forbidden_writes=forbidden_writes,
+        forbidden_writes=forbidden_write_targets,
         runtime_write=runtime_write,
         sentinels=tuple(sentinels),
         command=command,
-        environment=protected_environment(scratch),
+        environment=environment,
     )

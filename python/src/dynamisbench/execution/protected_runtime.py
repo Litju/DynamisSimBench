@@ -129,6 +129,13 @@ def protected_environment(scratch: Path) -> dict[str, str]:
     No inherited credential, `PYTHONPATH`, `PYTHONHOME` or user-site setting is passed. The
     bootstrap reduces the environment again after the -I -S startup. The operating-system
     values Windows requires are copied only by name.
+
+    ``LOCALAPPDATA`` is required by the Windows AppContainer ``CreateProcess`` path: with a
+    caller-supplied environment block and ``SECURITY_CAPABILITIES``, Windows refuses the
+    launch with ``ERROR_ENVVAR_NOT_FOUND`` unless that variable is present. It is a path,
+    not a secret, and the AppContainer token cannot read the user profile it names; the
+    bootstrap removes it before importing any scientific code. Its absence is a refusal, not
+    an inherited-environment fallback.
     """
     values = {
         "MUJOCO_GL": "disable",
@@ -143,9 +150,25 @@ def protected_environment(scratch: Path) -> dict[str, str]:
         "HOME": str(scratch),
     }
     if os.name == "nt":
-        for name in ("SYSTEMROOT", "WINDIR"):
+        for name in (
+            "SYSTEMROOT",
+            "WINDIR",
+            # `platform.machine()` reads PROCESSOR_ARCHITECTURE from the environment on
+            # Windows, and the pinned adapter refuses an unlabelled host. These are machine
+            # facts, not secrets, and the bootstrap's allowlist already keeps them.
+            "PROCESSOR_ARCHITECTURE",
+            "PROCESSOR_ARCHITEW6432",
+            "PROCESSOR_IDENTIFIER",
+        ):
             if name in os.environ:
                 values[name] = os.environ[name]
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            raise ProtectedRuntimeError(
+                "the Windows AppContainer launch requires LOCALAPPDATA in the supervisor "
+                "environment; refusing rather than inheriting a full environment"
+            )
+        values["LOCALAPPDATA"] = local_app_data
         values["PATH"] = str(Path(values.get("SYSTEMROOT", "C:/Windows")) / "System32")
     else:
         values["PATH"] = "/usr/bin:/bin"

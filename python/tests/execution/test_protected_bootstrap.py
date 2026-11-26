@@ -115,6 +115,59 @@ def test_the_bootstrap_refuses_a_wrong_self_hash_before_reading_config(tmp_path:
     assert b"bootstrap is not the supervisor-pinned" in completed.stderr
 
 
+def test_the_bootstrap_consumes_its_arguments_before_the_worker(
+    tmp_path: Path,
+) -> None:
+    """The worker entry point accepts no arguments; the bootstrap's digests must not reach it."""
+    import json
+    import sysconfig
+
+    bootstrap = protected_bootstrap_path()
+    actual = hashlib.sha256(bootstrap.read_bytes()).hexdigest()
+    source_root = Path(protected_bootstrap.__file__).resolve().parents[2]
+    site_packages = Path(sysconfig.get_paths()["purelib"])
+    base_prefix = Path(sysconfig.get_paths()["stdlib"]).parent
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    payload = {
+        "schema": "dynamisbench.protected.sandbox/1",
+        "mechanism": "windows-appcontainer",
+        "profile_sha256": "0" * 64,
+        "runtime_closure_sha256": "0" * 64,
+        "inputs": str(tmp_path / "inputs"),
+        "scratch": str(scratch),
+        "source_root": str(source_root),
+        "site_packages": str(site_packages),
+        "base_prefix": str(base_prefix),
+        "keep_paths": [str(base_prefix)],
+        "landlock_module": str(source_root / "dynamisbench" / "execution" / "landlock.py"),
+        "seccomp_module": str(source_root / "dynamisbench" / "execution" / "seccomp.py"),
+        "read_execute": [],
+        "read_only": [],
+        "read_write": [],
+        "memory_limit_bytes": 1,
+        "cpu_time_seconds": 1,
+        "max_file_bytes": 1,
+        "max_open_files": 1,
+    }
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+    (tmp_path / "sandbox.json").write_bytes(data)
+    digest = hashlib.sha256(data).hexdigest()
+    completed = subprocess.run(
+        [sys.executable, "-I", "-S", str(bootstrap), digest, actual],
+        cwd=tmp_path,
+        capture_output=True,
+        input=b"",
+        timeout=120,
+        check=False,
+    )
+
+    stderr = completed.stderr.decode("utf-8", "replace")
+    assert completed.returncode == 2
+    assert "accepts no arguments" not in stderr
+    assert "protected probe" in stderr.lower() or "protocolerror" in stderr.lower()
+
+
 def test_the_bootstrap_refuses_a_missing_config_before_the_sandbox(tmp_path: Path) -> None:
     bootstrap = protected_bootstrap_path()
     actual = hashlib.sha256(bootstrap.read_bytes()).hexdigest()
