@@ -309,19 +309,6 @@ jobs:
       # Windows runner is elevated and the adopted Windows production principal is
       # non-elevated, so the Windows job asserts the refusal and the launch contracts
       # instead of claiming an unqualified execution.
-      - name: Run the RES-555 protected supervisor execution (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Bounded: a hung protected attempt must fail the step, not the job.
-          timeout 1500 bash tools/res555_gate_b2/exec_in_cgroup.sh uv run --frozen pytest -q \
-            tests/execution/mujoco/test_protected_supervisor_execution.py
-        env:
-          DYNAMISBENCH_REQUIRE_MUJOCO: "1"
-          DYNAMISBENCH_REQUIRE_PROTECTED_ROUTE: "1"
-          DYNAMISBENCH_PROTECTED_ROUTE: "1"
-          DYNAMISBENCH_PROTECTED_SCRATCH_ROOT: /mnt/res555-scratch
       - name: Run the RES-555 protected launch contracts (Windows)
         if: runner.os != 'Linux'
         shell: bash
@@ -366,6 +353,90 @@ jobs:
           retention-days: 90
       - name: Release the RES-555 Linux containment boundary
         if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set +e
+          sudo umount /mnt/res555-scratch
+          sudo rmdir /sys/fs/cgroup/dynamisbench/supervisor
+          sudo rmdir /sys/fs/cgroup/dynamisbench
+
+  # RES-555 protected supervisor integration. Its own job because it provisions the
+  # adopted Linux mechanism (delegated cgroup v2 + a dedicated scratch tmpfs), because
+  # it executes a real supervised worker, and because it must not be lost to the
+  # general python job's timeout. It is not one of the eight ADR-025 gates.
+  res555-protected-supervisor:
+    name: res555-protected-supervisor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --frozen
+      - name: Provision the isolated MuJoCo worker environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --frozen --project worker-mujoco
+          worker_python="$GITHUB_WORKSPACE/python/worker-mujoco/.venv/bin/python"
+          "$worker_python" -I -m dynamisbench.adapters.mujoco --identity \
+            > "$RUNNER_TEMP/mujoco-identity.json"
+          echo "DYNAMISBENCH_MUJOCO_PYTHON=$worker_python" >> "$GITHUB_ENV"
+          echo "DYNAMISBENCH_REQUIRE_MUJOCO=1" >> "$GITHUB_ENV"
+      - name: Provision the RES-555 Linux containment boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/sys/fs/cgroup/dynamisbench
+          sudo mkdir -p "$root/supervisor"
+          for controller in pids memory cpu; do
+            if ! grep -qw "$controller" /sys/fs/cgroup/cgroup.subtree_control; then
+              echo "+$controller" | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null
+            fi
+          done
+          for controller in pids memory cpu; do
+            if ! grep -qw "$controller" "$root/cgroup.subtree_control"; then
+              echo "+$controller" | sudo tee "$root/cgroup.subtree_control" >/dev/null
+            fi
+          done
+          grep -qw pids /sys/fs/cgroup/cgroup.subtree_control
+          grep -qw pids "$root/cgroup.subtree_control"
+          sudo chown -R "$(id -u):$(id -g)" "$root"
+          sudo umount /mnt/res555-scratch 2>/dev/null || true
+          sudo mkdir -p /mnt/res555-scratch
+          sudo mount -t tmpfs -o size=64m,nr_inodes=4096,nodev,nosuid,noexec tmpfs /mnt/res555-scratch
+          sudo chown "$(id -u):$(id -g)" /mnt/res555-scratch
+          echo "DYNAMISBENCH_CGROUP_ROOT=$root" >> "$GITHUB_ENV"
+          echo "DYNAMISBENCH_PROTECTED_SCRATCH_ROOT=/mnt/res555-scratch" >> "$GITHUB_ENV"
+      - name: Run the protected pinned-reference supervisor execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Bounded: a hung attempt fails the step with the completed-test log, not
+          # the whole job after its timeout.
+          timeout 2400 bash tools/res555_gate_b2/exec_in_cgroup.sh \
+            uv run --frozen pytest -q -x \
+            tests/execution/mujoco/test_protected_supervisor_execution.py
+        env:
+          DYNAMISBENCH_REQUIRE_MUJOCO: "1"
+          DYNAMISBENCH_REQUIRE_PROTECTED_ROUTE: "1"
+          DYNAMISBENCH_PROTECTED_ROUTE: "1"
+          DYNAMISBENCH_PROTECTED_EVIDENCE_DIR: evidence/res555-protected-supervisor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: res555-protected-supervisor-linux-x64
+          path: python/evidence/res555-protected-supervisor/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Release the RES-555 Linux containment boundary
+        if: always()
         shell: bash
         run: |
           set +e
