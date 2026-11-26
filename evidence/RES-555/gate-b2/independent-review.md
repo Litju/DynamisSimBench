@@ -7,18 +7,35 @@ tests and automated reviews are listed separately and must not be counted as hum
 
 ## Exact material to review
 
-- Base: protected `main` at the branch's merge base.
-- Exact head: `b2c2309` (PR #35), the head named in `evidence/RES-555/gate-b2/authority-decision.md`
-  and the `res555-gate-b2-comparison` artifact for that head. A result on an earlier head is
-  not a qualification of this head.
-- A1 stack: PR #31 `bfd5e6a` → PR #32 `e705841` → PR #34 `5860904`.
+- Base: protected `main` at `16adf8a`.
+- Exact head: `b9b2f10` (PR #35), the corrected integration head that carries the CI repair
+  `6d389b9`, the adapter re-acceptance request `a00b3e0`, the reconciled A1 stack merge
+  `03c6238` and this packet update. A result on an earlier head is not a qualification of
+  this head. This packet update is documentation-only: the reviewed code is exactly
+  `b9b2f10`, and a later documentation commit does not change it.
+- A1 stack (reconciled with merge commits): PR #31 `fdb4305` → PR #32 `fbc69f7` →
+  PR #34 `01a3b42`.
 - Historical B2 feature head: `47ca8d3`.
 - Historical qualified integration head: `911d2e6` (workflow_dispatch `45270650148`, 10/10
   jobs). It is not a qualification of the current head.
 - Prior hardening code head: `cc72f91` (workflow_dispatch `45431738452` attempt 3, 10/10
   jobs). It is retained as historical evidence, not as the current exact head.
+- Later qualified heads: `b2c2309` (run `45684551797`), `afb93db` (Linux protected-supervisor
+  run `45740396472`) and `6d389b9` (the CI-repair head). Each is historical relative to
+  `b9b2f10`.
+- The exact-head `quality` run on `b9b2f10` is the run in PR #35's check rollup; it must
+  include the eight ADR-025 checks, `res555-gate-b2-comparison`,
+  `mujoco-receipt-comparison` and `res555-protected-supervisor`.
 - Diff under review: the commits with `RES-555` in their subject added after `47ca8d3`, plus
-  the protected-main merge and this increment's fixes.
+  the protected-main merges, the CI repair and the adapter re-acceptance request.
+
+## Human review status
+
+**PENDING. NO NAMED HUMAN REVIEWER HAS SIGNED THE CORRECTED HEAD.** The two adversarial
+automated reviews and every test on this page are supporting evidence, not the required
+security/runtime/scientific sign-off. The owner must name the reviewer, record the role,
+date, exact head and disposition in the reviewer section below. Until then, PR #35 is not
+merge-ready and the protected route stays inactive.
 
 ## Reviewer brief by discipline
 
@@ -72,7 +89,11 @@ tests and automated reviews are listed separately and must not be counted as hum
 2. Confirm the probe remains outside the production supervisor/API/CLI, protocol v1 is
    unchanged, and no native evidence, canonicalization, assessment or seal is produced.
 3. Confirm the adapter implementation digest change is attributed to
-   `physics.compile_model()` and requires explicit owner re-acceptance.
+   `physics.compile_model()` and that the expanded schema-2 candidate (worker, contracts and
+   bootstrap) is a separate explicit owner re-acceptance, not an implicit reuse of the
+   10-file identity. The candidate payload is in
+   `evidence/RES-555/gate-b2/adapter-manifest-candidate.json`; the route still pins the
+   accepted 10-file digests.
 4. Confirm D4's sidecar receipt is not presented as authenticated evidence and ADR-027 is
    still proposed / outside this increment.
 5. Confirm the proposed production increment is limited to the pinned reference profile, not
@@ -121,6 +142,17 @@ Signature / disposition (approve, approve with conditions, reject):
   57/57 checks, `scratch.max_files=256`, and both comparison jobs passed. The retained
   observations are in `evidence/RES-555/gate-b2/observations/`. A local WSL ABI 3 run is not
   a qualification of the ABI >= 4 profile.
+- Protected-supervisor integration: Windows 53/53 checks on a non-elevated local principal;
+  Linux 55/55 checks on the dedicated CI job at `afb93db` (run `45740396472`), with Landlock
+  ABI 8, seccomp, a delegated cgroup and a dedicated 64 MiB tmpfs. The retained records are
+  in `evidence/RES-555/gate-b2/protected-supervisor/`.
+- CI repair `6d389b9`: the workflow-authority test now registers
+  `res555-protected-supervisor` with its exact artifact contract and the eight ADR-025 gates
+  are preserved. The exact-head run is the basis for the post-repair qualification.
+- Adapter re-acceptance request `a00b3e0`: candidate schema-2 digests
+  `86d5e912...` (Windows) and `9ea31547...` (Linux), generated from the 13-file manifest and
+  checked against the retained worker/bootstrap observations. It is a request, not
+  acceptance.
 
 ## Automated review dispositions (not human review)
 
