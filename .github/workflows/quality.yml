@@ -419,10 +419,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Bounded: a hung attempt fails the step with the completed-test log, not
-          # the whole job after its timeout.
-          timeout 2400 bash tools/res555_gate_b2/exec_in_cgroup.sh \
-            uv run --frozen pytest -q -x \
+          # Bounded, and instrumented: a test that runs longer than 150 s dumps every
+          # thread's stack into the log, so a hang names its own cause instead of only
+          # failing the step.
+          timeout 1500 bash tools/res555_gate_b2/exec_in_cgroup.sh \
+            uv run --frozen pytest -q -x -o faulthandler_timeout=150 \
             tests/execution/mujoco/test_protected_supervisor_execution.py
         env:
           DYNAMISBENCH_REQUIRE_MUJOCO: "1"
