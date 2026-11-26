@@ -217,6 +217,9 @@ def test_the_published_paths_are_the_versioned_routes() -> None:
         f"{API_V1_PREFIX}/workspaces/open",
         f"{API_V1_PREFIX}/workspaces/{{workspace_id}}/artifacts",
         f"{API_V1_PREFIX}/workspaces/{{workspace_id}}/artifacts/{{artifact_id}}",
+        f"{API_V1_PREFIX}/workspaces/{{workspace_id}}/external-results",
+        f"{API_V1_PREFIX}/workspaces/{{workspace_id}}/external-results/{{result_id}}",
+        f"{API_V1_PREFIX}/workspaces/{{workspace_id}}/external-results/{{result_id}}/samples",
     }, sorted(paths)
 
 

@@ -253,6 +253,19 @@ def encode_float_columns(columns: Sequence[tuple[str, Sequence[float]]]) -> byte
     encoded stream above :data:`MAX_ARROW_IPC_BYTES` is refused with a closed reason.
     Deterministic for equal input.
     """
+    return _encode_float_columns(columns, nullable=False)
+
+
+def encode_nullable_float_columns(
+    columns: Sequence[tuple[str, Sequence[float | None]]],
+) -> bytes:
+    """Transport recorded numeric data, preserving nulls and IEEE nonfinite values."""
+    return _encode_float_columns(columns, nullable=True)
+
+
+def _encode_float_columns(
+    columns: Sequence[tuple[str, Sequence[float | None]]], *, nullable: bool
+) -> bytes:
     if not columns:
         raise ArrowTransportError(ArrowFailure.EMPTY)
     names = [name for name, _values in columns]
@@ -264,11 +277,15 @@ def encode_float_columns(columns: Sequence[tuple[str, Sequence[float]]]) -> byte
         raise ArrowTransportError(ArrowFailure.EMPTY)
     if rows > MAX_ARROW_ROWS:
         raise ArrowTransportError(ArrowFailure.TOO_MANY_ROWS)
+    if nullable and len(names) > MAX_ARROW_COLUMNS:
+        raise ArrowTransportError(ArrowFailure.TOO_MANY_COLUMNS)
+    if nullable and rows * len(names) > MAX_ARROW_LOGICAL_VALUES:
+        raise ArrowTransportError(ArrowFailure.TOO_MANY_VALUES)
     for _name, values in columns:
-        if not all(math.isfinite(value) for value in values):
+        if not nullable and not all(value is not None and math.isfinite(value) for value in values):
             raise ArrowTransportError(ArrowFailure.MALFORMED)
     pa = _pyarrow()
-    schema = pa.schema([pa.field(name, pa.float64(), nullable=False) for name in names])
+    schema = pa.schema([pa.field(name, pa.float64(), nullable=nullable) for name in names])
     table = pa.Table.from_arrays(
         [pa.array(values, type=pa.float64()) for _name, values in columns], schema=schema
     )

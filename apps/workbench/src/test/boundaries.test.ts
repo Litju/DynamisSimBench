@@ -415,14 +415,15 @@ describe("Arrow is a lazy transport utility", () => {
     expect(source).not.toMatch(/^\s*import\s*["']apache-arrow["']/m);
   });
 
-  it("is imported only by the laboratory's frame decoder, never by the route tree, the client or the shell", () => {
+  it("is imported only by the recording and external sample decoders", () => {
     const importers = filesMatching((source) =>
       importSpecifiers(source).some((specifier) => specifier.includes("arrow/arrow")),
     );
 
-    // The laboratory route is itself lazily loaded, so the columnar stack stays out of the
-    // initial module graph twice over.
-    expect(importers).toEqual(["laboratory/frames.ts"]);
+    expect(importers).toEqual(["laboratory/frames.ts", "workbench/external-samples.ts"]);
+    const route = sourceOf("routes/external-results.tsx");
+    expect(route).toContain('import("../workbench/external-samples")');
+    expect(route).not.toMatch(/^import\s+\{[^}]*decodeExternalSamples[^}]*\}\s+from/m);
   });
 });
 
