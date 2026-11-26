@@ -195,7 +195,7 @@ the mechanism is unavailable.
 | F5 pinned request authority | **implemented**: the production `_verify_reference_authority` runs before compile, and the profile compares the same tuple |
 | F6 canary drain | **implemented**: two-cycle drain confirmed by the cycle counter |
 | F7 Linux venv closure | **implemented**: `pyvenv.cfg` measured, in the read allowlist, re-verified by the worker and after exit |
-| #8 adapter identity including worker/bootstrap | **NOT satisfied**: the accepted digests remain the 10-file B2 manifest. The bootstrap is profile-pinned and the worker entry is in the runtime source closure and recorded as `worker_entry_sha256`, but the owner's requested manifest change is a new acceptance decision that this increment does not make |
+| #8 adapter identity including worker/bootstrap | **REQUESTED, NOT ACCEPTED**: the schema-2 candidate binds the 13 files (the accepted 10 adapter files plus the production worker, its contracts and the bootstrap) and both candidate digests are prepared in `adapter-manifest-reacceptance.md`. The route still pins the accepted 10-file identity; the owner has not signed the replacement |
 | #9 non-elevated Windows principal | **implemented as a gate**; **unqualified on hosted CI**, which is elevated |
 | #10 comparator/reference quality | **partly**: the supervisor compares the pinned numerics; the profile does not load `reference-observation.json`, and a test asserting profile == committed reference is still absent |
 | #11 stack reconciliation (F8/F9) | **open**: #31–#35 are behind current main and need merge-commit updates and exact-head re-qualification |

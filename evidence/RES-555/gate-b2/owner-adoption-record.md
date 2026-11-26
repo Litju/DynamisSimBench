@@ -147,6 +147,24 @@ view.
 The owner must explicitly re-accept these digests. The B2 packet does not do so, and no
 existing acceptance is silently reused.
 
+### Candidate replacement identity (prepared 2026-11-26, not accepted)
+
+The 10-file identity above remains the only accepted identity. The inside-sandbox production
+worker, its shared contracts and the bootstrap are now measured by the runtime source closure
+and individually recorded, and a schema-2 candidate that binds them has been prepared for
+explicit re-acceptance:
+
+| Platform | Candidate implementation digest (`.../2`) | Files |
+|---|---|---:|
+| Windows x86-64 | `86d5e912fa876208e156bfe13f91be6a5cfde7f0aefcc9e0bbf3aedbc7051f20` | 13 |
+| Linux x86-64 | `9ea31547f2246e2a8eedcaefcac8ae767086711c96ad79d5da835f72e5bc2ea1` | 13 |
+
+The exact payload, per-file hashes and reproduction command are in
+[`adapter-manifest-reacceptance.md`](./adapter-manifest-reacceptance.md) and
+[`adapter-manifest-candidate.json`](./adapter-manifest-candidate.json). This is a request,
+not acceptance: the protected profile still pins the 10-file digests, and no production route
+is enabled.
+
 ### Pinned numerical reference
 
 **Proposed:** accept `f585292...` as the only eligible trajectory and the numeric values in
@@ -216,6 +234,7 @@ The owner is asked to choose one:
 | Date | **2026-11-25** |
 | Linear RES-555 reference / decision comment | RES-555. This session cannot write the Linear API; the owner should paste/confirm this record in the existing issue. |
 | Adapter identity re-accepted (Windows digest / Linux digest) | **Windows `4a907d4262ceca66588188ddcc37894ec488a55f0756886864c89bc5f99827b8`; Linux `7993ac96c91de71a7b5f8770d444c318d6c1283de5b8f0f0d1c615d7c6afe097`** |
+| Adapter schema-2 candidate (worker/contracts/bootstrap) accepted? | **PENDING — the request is prepared in `adapter-manifest-reacceptance.md`; the 10-file identity remains in force until this row is signed.** |
 | Persisted supervisor record name/schema | **`protected-consumption.json` / `dynamisbench.protected-consumption/1`** (accepted conditionally; worker sidecar remains `scratch/consumption.json`) |
 | Windows production principal (non-elevated required? accepted residual?) | **Non-elevated required for production. The hosted elevated CI token remains mechanism evidence only; a non-elevated principal or an explicit residual acceptance and re-qualification is still required.** |
 | Linux delegated cgroup + dedicated scratch required? | **Yes for production.** |

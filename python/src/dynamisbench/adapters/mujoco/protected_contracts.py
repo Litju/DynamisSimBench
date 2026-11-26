@@ -14,7 +14,7 @@ import os
 import stat
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 from pydantic import ConfigDict, Field
 
@@ -75,6 +75,7 @@ __all__ = [
     "WorkerRuntimeSummary",
     "assert_probe_authorized",
     "combined_runtime_digest",
+    "expanded_implementation_identity",
     "measure_root_closure",
     "measure_runtime_identity",
     "read_bounded_regular",
@@ -87,6 +88,27 @@ __all__ = [
 
 PROBE_ENV_VAR: Final = "DYNAMISBENCH_RES555_B2_PROBE"
 """The explicit probe gate. Production execution has no such environment variable."""
+
+CANDIDATE_IDENTITY_SCHEMA: Final = "dynamisbench.mujoco.implementation-identity/2"
+"""The proposed identity schema that also binds the executed production entry files.
+
+This is a re-acceptance request, not current authority. The protected route continues to
+pin the accepted 10-file ``dynamisbench.mujoco.implementation-identity/1`` digest until the
+owner signs both platform values.
+"""
+
+CANDIDATE_PRODUCTION_ENTRY_FILES: Final = (
+    "dynamisbench/adapters/mujoco/protected_contracts.py",
+    "dynamisbench/adapters/mujoco/protected_worker.py",
+    "dynamisbench/execution/protected_bootstrap.py",
+)
+"""The inside-sandbox production files the accepted 10-file manifest does not bind.
+
+The worker entry, the shared contracts it imports to reconstruct the identity, and the
+bootstrap that applies the sandbox before the worker import. The launcher, host mechanisms
+and sandbox policy modules stay outside this adapter identity: the runtime source closure
+already measures the whole snapshot, and the profile separately pins the sandbox modules.
+"""
 
 ISOLATION_PROFILE_SCHEMA: Final = "dynamisbench.res555.isolation-profile/1"
 CLOSURE_SCHEMA: Final = "dynamisbench.res555.runtime-closure/1"
@@ -813,6 +835,65 @@ def reconstruct_implementation_digest(
     }
     digest = sha256_bytes(canonical_semantic_bytes(payload))
     return digest, tuple(manifest)
+
+
+def expanded_implementation_identity(
+    *,
+    source_root: Path,
+    model_sha256: str,
+    engine_version: str,
+    python_version: str,
+    platform_tag: str,
+) -> tuple[str, dict[str, Any]]:
+    """Compute the proposed identity that also binds the executed production entry files.
+
+    This is the exact payload the owner is asked to re-accept; it is deliberately not the
+    identity the protected route pins. The accepted 10-file manifest remains in force until
+    both platform digests are signed and the profile is updated in a separate commit.
+
+    ``source_manifest`` keeps the adapter-relative paths of the accepted identity.
+    ``production_entry_manifest`` uses repository-root-relative POSIX paths for the worker,
+    its shared contracts and the bootstrap. The packaged model is represented by the
+    verified view digest, exactly as in :func:`reconstruct_implementation_digest`.
+
+    The dependency closure is the reviewed :data:`dependencies.APPROVED_DEPENDENCIES`
+    payload rather than the running interpreter's observation, so the generator produces
+    both platform values from one host. The runtime worker still verifies the installed
+    closure and refuses a different one; the lockfile check is a separate repository test.
+    """
+    adapter_root = source_root / "dynamisbench" / "adapters" / "mujoco"
+    manifest: list[dict[str, str]] = []
+    for relative in sorted(reference.ADAPTER_SOURCE_FILES):
+        if relative == reference.MODEL_ASSET_PATH:
+            digest = model_sha256
+        else:
+            data = read_bounded_regular(adapter_root / relative, limit=MAX_VIEW_FILE_BYTES)
+            digest = sha256_bytes(data)
+        manifest.append({"path": relative, "sha256": digest})
+
+    entry_manifest: list[dict[str, str]] = []
+    for relative in sorted(CANDIDATE_PRODUCTION_ENTRY_FILES):
+        data = read_bounded_regular(source_root / relative, limit=MAX_VIEW_FILE_BYTES)
+        entry_manifest.append({"path": relative, "sha256": sha256_bytes(data)})
+
+    payload: dict[str, Any] = {
+        "schema": CANDIDATE_IDENTITY_SCHEMA,
+        "adapter_id": reference.ADAPTER_ID,
+        "adapter_version": reference.ADAPTER_VERSION,
+        "engine": reference.ENGINE,
+        "engine_version": engine_version,
+        "protocol_version": WORKER_PROTOCOL_VERSION,
+        "capabilities": sorted(capability.value for capability in reference.CAPABILITIES),
+        "platform": platform_tag,
+        "python_version": python_version,
+        "model_sha256": model_sha256,
+        "source_manifest": manifest,
+        "production_entry_manifest": entry_manifest,
+        "dependency_closure": dependencies.DependencyClosure(
+            packages=dependencies.APPROVED_DEPENDENCIES
+        ).as_json_object(),
+    }
+    return sha256_bytes(canonical_semantic_bytes(payload)), payload
 
 
 class ProbeObservation(_Model):
