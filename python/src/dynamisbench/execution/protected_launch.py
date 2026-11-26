@@ -52,6 +52,7 @@ from dynamisbench.adapters.mujoco import reference
 from dynamisbench.adapters.mujoco.protected_contracts import (
     MAX_RECEIPT_BYTES,
     ConsumptionReceipt,
+    expanded_implementation_identity,
     ProbeObservation,
     ProbeTargets,
     RuntimeSummary,
@@ -950,6 +951,38 @@ class ProtectedRun:
     prepared: PreparedExecutionInputs
 
 
+def _verify_production_identity(profile: PinnedReferenceProfile, source_root: Path) -> str:
+    """Independently bind all 13 approved production files before any worker can run.
+
+    The historical protocol-v1 request/worker still checks its ten-file adapter identity.
+    The owner-approved schema-2 identity is an additional, mandatory supervisor check of
+    the exact worker, contract and bootstrap bytes in the measured execution snapshot.
+    Keeping the two checks separate preserves WorkerRequest/WorkerResponse v1 without
+    rewriting the files whose SHA-256 values were approved on 2026-11-26.
+    """
+    try:
+        digest, _payload = expanded_implementation_identity(
+            source_root=source_root,
+            model_sha256=profile.model_sha256,
+            engine_version=profile.engine_version,
+            python_version=profile.python_version,
+            platform_tag=profile.platform,
+        )
+    except Exception as error:  # noqa: BLE001 - a malformed source is a closed refusal
+        raise ProtectedLaunchError(
+            RefusalCode.ADAPTER_ENGINE_MISMATCH,
+            "the protected production source identity cannot be reconstructed: "
+            f"{type(error).__name__}",
+        ) from error
+    if digest != profile.production_implementation_digest:
+        raise ProtectedLaunchError(
+            RefusalCode.ADAPTER_ENGINE_MISMATCH,
+            "the 13-file protected implementation is not the conditionally accepted "
+            "schema-2 identity",
+        )
+    return digest
+
+
 def prepare_protected_route(
     *,
     worker_python: Path,
@@ -987,6 +1020,7 @@ def prepare_protected_route(
             registry_root=registry_root,
             profile=profile,
         )
+        _verify_production_identity(profile, runtime.source_root)
     except BaseException:
         platform.close()
         raise
@@ -1758,6 +1792,32 @@ class ProtectedAttempt:
                     "the measured bootstrap is not the profile-pinned bytes after exit",
                 )
             )
+        try:
+            observed_production = _verify_production_identity(profile, runtime.source_root)
+        except ProtectedLaunchError as error:
+            checks.append(
+                _check(
+                    "production_entry_identity",
+                    False,
+                    error.message,
+                    profile.production_implementation_digest,
+                )
+            )
+            refusals.append(
+                refusal(
+                    RefusalCode.ADAPTER_ENGINE_MISMATCH,
+                    "the 13-file production identity cannot be verified after execution",
+                )
+            )
+        else:
+            checks.append(
+                _check(
+                    "production_entry_identity",
+                    True,
+                    observed_production,
+                    profile.production_implementation_digest,
+                )
+            )
         return post.digest
 
     def _verify_venv(self, checks: list[dict[str, object]], refusals: list[Refusal]) -> None:
@@ -2343,6 +2403,7 @@ def begin_protected_attempt(
             RefusalCode.WORKER_START_FAILED,
             "the protected runtime closure does not reproduce the measured identity",
         )
+    _verify_production_identity(profile, runtime.source_root)
     if runtime.venv_config_path is not None:
         _, observed_venv = sha256_file(runtime.venv_config_path, max_bytes=_MAX_SMALL_FILE_BYTES)
         if observed_venv != runtime.venv_config_sha256:

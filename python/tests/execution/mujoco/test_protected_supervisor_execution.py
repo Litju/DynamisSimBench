@@ -181,6 +181,7 @@ def test_the_protected_route_completes_inside_the_supervisor(
         "receipt_failure_absent",
         "receipt_final_time",
         "receipt_dependency_closure",
+        "production_entry_identity",
         "input_view_unchanged",
         "runtime_unchanged",
         "bootstrap_pinned",
