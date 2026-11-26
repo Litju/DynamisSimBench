@@ -71,7 +71,10 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import IO, Final, final
+from typing import IO, TYPE_CHECKING, Any, Final, Protocol, final
+
+if TYPE_CHECKING:
+    from dynamisbench.execution.protected_launch import ProtectedRun
 
 from dynamisbench.evidence.bundle import (
     BundleConflictError,
@@ -518,7 +521,23 @@ def _notify(observer: _LifecycleObserverDispatcher | None, state: RunLifecycleSt
     observer.notify(state)
 
 
-def _terminate_and_reap(process: subprocess.Popen[bytes], tree: ProcessTree) -> tuple[bool, bool]:
+class _TreeLike(Protocol):
+    """The ownership primitive the supervisor needs, for either launch mechanism.
+
+    :class:`~dynamisbench.execution._process_tree.ProcessTree` owns a POSIX session or a
+    Windows Job Object; the protected route's tree owns a Job Object or a cgroup v2 subtree.
+    Both must be able to request termination, prove emptiness and close, and the supervisor
+    must not care which one it holds.
+    """
+
+    def request_termination(self) -> None: ...
+
+    def wait_empty(self, timeout: float) -> bool: ...
+
+    def close(self) -> None: ...
+
+
+def _terminate_and_reap(process: Any, tree: _TreeLike) -> tuple[bool, bool]:
     """Terminate the whole tree, reap the direct child, and verify the tree is empty.
 
     The two returned facts are deliberately separate. ``worker_reaped`` is about the direct
@@ -535,14 +554,14 @@ def _terminate_and_reap(process: subprocess.Popen[bytes], tree: ProcessTree) -> 
     # the entire grace period observing the supervisor's own zombie instead of descendants.
     try:
         process.wait(timeout=_TERMINATION_GRACE_SECONDS)
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, TimeoutError):
         try:
             process.kill()
         except OSError:
             pass
         try:
             process.wait(timeout=_TERMINATION_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
+        except (subprocess.TimeoutExpired, TimeoutError):
             pass
     worker_reaped = process.poll() is not None
     try:
@@ -774,6 +793,7 @@ def execute_preflighted(
     *,
     cancel_event: threading.Event | None = None,
     observer: LifecycleObserver | None = None,
+    protected: ProtectedRun | None = None,
 ) -> SupervisedExecution:
     """Launch, supervise and describe one preflight-admitted run.
 
@@ -785,6 +805,12 @@ def execute_preflighted(
     a bounded join, so no observer can extend the worker's deadline, cancellation, cleanup
     or return path.
 
+    :param protected: an explicitly opened protected route and its prepared inputs. It is
+        ``None`` by default, and the default is the existing diagnostic worker. Passing one
+        is an internal activation decision made by a trusted caller: this function is not
+        reachable from the API, the CLI, the desktop shell or the workbench, and no
+        environment variable enables the protected route. A protected refusal never falls
+        back to the diagnostic launch.
     :raises PreflightRefusedError: if ``preflighted`` was refused or carries no request.
         Executing a refused run is a programming error, and silently starting one would
         defeat the admission gate.
@@ -795,6 +821,7 @@ def execute_preflighted(
             preflighted,
             cancel_event=cancel_event,
             observer=dispatcher,
+            protected=protected,
         )
     finally:
         dispatcher.close(_OBSERVER_CLOSE_SECONDS)
@@ -805,6 +832,7 @@ def _execute_preflighted(
     *,
     cancel_event: threading.Event | None,
     observer: _LifecycleObserverDispatcher | None,
+    protected: ProtectedRun | None = None,
 ) -> SupervisedExecution:
     """Supervise one admitted run on behalf of :func:`execute_preflighted`."""
     report = preflighted.report
@@ -815,6 +843,32 @@ def _execute_preflighted(
     workspace = preflighted.workspace
     manifest = preflighted.manifest
     run = request.run_id
+
+    protected_attempt: Any = None
+    if protected is not None:
+        # The route and the prepared inputs are separate values; refusing a mismatch here
+        # keeps a protected attempt from being supervised under a different admission.
+        from dynamisbench.execution import protected_launch
+
+        if not isinstance(protected, protected_launch.ProtectedRun):
+            raise TypeError(
+                "protected execution requires a ProtectedRun built by "
+                "prepare_protected_route and prepare_execution_inputs"
+            )
+        if protected.route.workspace is not None and (
+            protected.route.workspace.source_root != workspace.source_root
+        ):
+            return _refused_without_process(
+                request=request,
+                state=RunLifecycleState.REFUSED,
+                refusals=[
+                    refusal(
+                        RefusalCode.FORBIDDEN_PATH,
+                        "the protected route belongs to a different workspace than the admission",
+                    )
+                ],
+                observer=observer,
+            )
 
     initial_refusals = admission_refusals(
         preflighted,
@@ -830,8 +884,9 @@ def _execute_preflighted(
         )
 
     bundle: StagingBundle | None = None
-    process: subprocess.Popen[bytes] | None = None
-    tree: ProcessTree | None = None
+    process: Any = None
+    tree: Any = None
+    program: Path | None = None
     stdin_writer: _StdinWriter | None = None
     stdout_reader: _BoundedStreamReader | None = None
     stderr_reader: _BoundedStreamReader | None = None
@@ -847,6 +902,9 @@ def _execute_preflighted(
     stderr_truncated = False
     stderr_bytes = b""
     stdout_bytes = b""
+    response: WorkerResponse | None = None
+    response_matches = False
+    protected_tree_closed = False
 
     _notify(observer, RunLifecycleState.STARTING)
     try:
@@ -924,33 +982,34 @@ def _execute_preflighted(
                 observer=observer,
             )
 
-        try:
-            program = resolved_worker_program(manifest)
-        except WorkerEnvironmentError:
-            refusals.append(
-                refusal(
-                    RefusalCode.WORKER_PROGRAM_UNRESOLVED,
-                    "the selected worker program was not an executable file at launch time",
+        if protected is None:
+            try:
+                program = resolved_worker_program(manifest)
+            except WorkerEnvironmentError:
+                refusals.append(
+                    refusal(
+                        RefusalCode.WORKER_PROGRAM_UNRESOLVED,
+                        "the selected worker program was not an executable file at launch time",
+                    )
                 )
-            )
-            state = RunLifecycleState.FAILED
-            return _finish(
-                bundle=bundle,
-                request=request,
-                state=state,
-                refusals=refusals,
-                worker_exit_code=None,
-                worker_pid=None,
-                worker_reaped=False,
-                stdin_delivered=False,
-                process_tree_cleaned=False,
-                stdout_truncated=False,
-                stderr_truncated=False,
-                stderr_bytes=b"",
-                observer=observer,
-            )
+                state = RunLifecycleState.FAILED
+                return _finish(
+                    bundle=bundle,
+                    request=request,
+                    state=state,
+                    refusals=refusals,
+                    worker_exit_code=None,
+                    worker_pid=None,
+                    worker_reaped=False,
+                    stdin_delivered=False,
+                    process_tree_cleaned=False,
+                    stdout_truncated=False,
+                    stderr_truncated=False,
+                    stderr_bytes=b"",
+                    observer=observer,
+                )
 
-        working_directory = _working_directory(workspace, run)
+            working_directory = _working_directory(workspace, run)
         request_bytes = canonical_worker_request_bytes(request) + b"\n"
         if len(request_bytes) > MAX_WORKER_MESSAGE_BYTES:
             refusals.append(
@@ -996,22 +1055,74 @@ def _execute_preflighted(
                 observer=observer,
             )
 
-        launch_environment = worker_environment(manifest, temporary_directory=working_directory)
-        command = _launch_command(program, manifest)
-        try:
-            process, tree = _launch(
-                command,
-                working_directory=working_directory,
-                environment=launch_environment,
+        if protected is not None:
+            from dynamisbench.execution.protected_launch import (
+                ProtectedLaunchError,
+                begin_protected_attempt,
             )
-        except OSError:
-            refusals.append(
-                refusal(
-                    RefusalCode.WORKER_START_FAILED,
-                    "the operating system refused to start the selected worker program",
+
+            try:
+                protected_attempt = begin_protected_attempt(
+                    protected.route,
+                    request=request,
+                    prepared=protected.prepared,
+                    selection=manifest,
+                    workspace=workspace,
                 )
+            except ProtectedLaunchError as error:
+                refusals.append(refusal(error.code, error.message))
+                state = RunLifecycleState.REFUSED
+                return _finish(
+                    bundle=bundle,
+                    request=request,
+                    state=state,
+                    refusals=refusals,
+                    worker_exit_code=None,
+                    worker_pid=None,
+                    worker_reaped=False,
+                    stdin_delivered=False,
+                    process_tree_cleaned=False,
+                    stdout_truncated=False,
+                    stderr_truncated=False,
+                    stderr_bytes=b"",
+                    observer=observer,
+                )
+            working_directory = protected_attempt.attempt
+            command: list[str] = []
+            launch_environment: dict[str, str] = {}
+        else:
+            assert program is not None and working_directory is not None
+            launch_environment = worker_environment(manifest, temporary_directory=working_directory)
+            command = _launch_command(program, manifest)
+        start_refusal: Refusal | None = None
+        start_state = RunLifecycleState.FAILED
+        try:
+            if protected_attempt is not None:
+                process, tree = protected_attempt.start()
+            else:
+                assert working_directory is not None
+                process, tree = _launch(
+                    command,
+                    working_directory=working_directory,
+                    environment=launch_environment,
+                )
+        except OSError:
+            start_refusal = refusal(
+                RefusalCode.WORKER_START_FAILED,
+                "the operating system refused to start the selected worker program",
             )
-            state = RunLifecycleState.FAILED
+        except Exception as error:
+            if protected_attempt is None:
+                raise
+            from dynamisbench.execution.protected_launch import ProtectedLaunchError
+
+            if not isinstance(error, ProtectedLaunchError):
+                raise
+            start_refusal = refusal(error.code, error.message)
+            start_state = RunLifecycleState.REFUSED
+        if start_refusal is not None:
+            refusals.append(start_refusal)
+            state = start_state
             return _finish(
                 bundle=bundle,
                 request=request,
@@ -1029,16 +1140,30 @@ def _execute_preflighted(
             )
 
         worker_pid = process.pid
-        deadline = time.monotonic() + manifest.timeout_seconds
+        if protected_attempt is not None:
+            # The profile's wall clock is the protected bound; the manifest timeout belongs
+            # to the diagnostic worker and may be longer.
+            wall_seconds = min(
+                manifest.timeout_seconds, protected_attempt.route.profile.max_wall_seconds
+            )
+            stdout_limit = protected_attempt.route.profile.max_stdout_bytes
+            stderr_limit = min(
+                manifest.max_log_bytes, protected_attempt.route.profile.max_stderr_bytes
+            )
+        else:
+            wall_seconds = manifest.timeout_seconds
+            stdout_limit = MAX_WORKER_MESSAGE_BYTES
+            stderr_limit = manifest.max_log_bytes
+        deadline = time.monotonic() + wall_seconds
         _notify(observer, RunLifecycleState.RUNNING)
         assert process.stdout is not None
         assert process.stderr is not None
         assert process.stdin is not None
         stdout_reader = _BoundedStreamReader(
-            process.stdout, limit=MAX_WORKER_MESSAGE_BYTES, fail_on_overflow=True
+            process.stdout, limit=stdout_limit, fail_on_overflow=True
         )
         stderr_reader = _BoundedStreamReader(
-            process.stderr, limit=manifest.max_log_bytes, fail_on_overflow=False
+            process.stderr, limit=stderr_limit, fail_on_overflow=False
         )
         stdin_writer = _StdinWriter(process.stdin, request_bytes)
         stdout_reader.start()
@@ -1143,7 +1268,7 @@ def _execute_preflighted(
             state = RunLifecycleState.FAILED
         else:
             try:
-                response = parse_worker_response(stdout_bytes)
+                parsed_response = parse_worker_response(stdout_bytes)
             except WorkerProtocolError:
                 refusals.append(
                     refusal(
@@ -1153,6 +1278,8 @@ def _execute_preflighted(
                 )
                 state = RunLifecycleState.FAILED
             else:
+                response = parsed_response
+                response_matches = not _response_refusals(response, request)
                 refusals.extend(_response_refusals(response, request))
                 if refusals:
                     state = RunLifecycleState.FAILED
@@ -1177,6 +1304,68 @@ def _execute_preflighted(
             )
             if state is RunLifecycleState.COMPLETED:
                 state = RunLifecycleState.FAILED
+
+        if protected_attempt is not None:
+            # Correlate the finished attempt with the supervisor's own measurements. The
+            # worker receipt is untrusted input; the checks and refusals are the supervisor's.
+            # Any failure here is a terminal refusal, never an escaping exception.
+            from dynamisbench.execution.protected_launch import ProtectedLaunchError
+
+            try:
+                correlation = protected_attempt.observe(
+                    exit_code=exit_code,
+                    response=response,
+                    response_matches=response_matches,
+                    stdout_truncated=stdout_truncated
+                    or stop_reason is RefusalCode.WORKER_OUTPUT_TOO_LARGE,
+                    stdin_delivered=stdin_delivered,
+                )
+            except Exception as error:  # noqa: BLE001 - a refused correlation is terminal
+                refusals.append(
+                    refusal(
+                        RefusalCode.WORKER_FAILED,
+                        f"the protected correlation could not be completed: {type(error).__name__}",
+                    )
+                )
+                correlation = []
+            refusals.extend(correlation)
+            if refusals and state is RunLifecycleState.COMPLETED:
+                state = RunLifecycleState.FAILED
+            if tree is not None:
+                try:
+                    tree.close()
+                except Exception:  # noqa: BLE001 - cleanup is best effort
+                    pass
+                protected_tree_closed = True
+                if bool(getattr(tree, "cleanup_failed", False)):
+                    refusals.append(
+                        refusal(
+                            RefusalCode.WORKER_FAILED,
+                            "the protected ownership primitive could not be released",
+                        )
+                    )
+                    if state is RunLifecycleState.COMPLETED:
+                        state = RunLifecycleState.FAILED
+            if bundle is not None and protected_attempt.record is not None:
+                try:
+                    protected_attempt.persist(
+                        bundle,
+                        state=state,
+                        refusals=tuple(refusals),
+                        process_tree_cleaned=process_tree_cleaned,
+                        stdout_bytes=len(stdout_bytes),
+                        stderr_bytes=len(stderr_bytes),
+                    )
+                except (EvidenceError, ProtectedLaunchError):
+                    refusals.append(
+                        refusal(
+                            RefusalCode.EVIDENCE_WRITE_FAILED,
+                            "the correlated protected consumption record could not be written "
+                            "into staging",
+                        )
+                    )
+                    if state is RunLifecycleState.COMPLETED:
+                        state = RunLifecycleState.FAILED
     except BaseException:
         if bundle is not None:
             bundle.close_for_payload()
@@ -1191,13 +1380,21 @@ def _execute_preflighted(
                 except OSError:
                     pass
         if tree is not None:
-            try:
-                process_tree_cleaned = tree.wait_empty(_TERMINATION_GRACE_SECONDS) and (
-                    process_tree_cleaned or process is None
+            if protected_tree_closed:
+                # The protected branch already closed the ownership primitive, so its
+                # emptiness proof and release result are final; re-reading a closed job or
+                # cgroup would report a false negative.
+                process_tree_cleaned = process_tree_cleaned and not bool(
+                    getattr(tree, "cleanup_failed", False)
                 )
-            except OSError:
-                process_tree_cleaned = False
-            tree.close()
+            else:
+                try:
+                    process_tree_cleaned = tree.wait_empty(_TERMINATION_GRACE_SECONDS) and (
+                        process_tree_cleaned or process is None
+                    )
+                except OSError:
+                    process_tree_cleaned = False
+                tree.close()
         if stdin_writer is not None:
             stdin_writer.join(_JOIN_SECONDS)
             stdin_delivered = stdin_delivered or stdin_writer.delivered
@@ -1205,7 +1402,11 @@ def _execute_preflighted(
             stderr_reader.join(_JOIN_SECONDS)
         if stdout_reader is not None:
             stdout_reader.join(_JOIN_SECONDS)
-        if working_directory is not None:
+        if protected_attempt is not None:
+            # The protected attempt owns its view, scratch, sentinels, canary and tree; it
+            # removes them together. The supervisor only removes its own scratch directory.
+            protected_attempt.cleanup()
+        elif working_directory is not None:
             shutil.rmtree(working_directory, ignore_errors=True)
 
     if stdout_reader is not None and not stdout_bytes:

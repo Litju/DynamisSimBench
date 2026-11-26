@@ -1,0 +1,425 @@
+{
+  "accepted_identity": {
+    "digests": {
+      "linux-x86-64": "7993ac96c91de71a7b5f8770d444c318d6c1283de5b8f0f0d1c615d7c6afe097",
+      "windows-x86-64": "4a907d4262ceca66588188ddcc37894ec488a55f0756886864c89bc5f99827b8"
+    },
+    "schema": "dynamisbench.mujoco.implementation-identity/1",
+    "source_file_count": 10,
+    "source_files": [
+      "__init__.py",
+      "__main__.py",
+      "dependencies.py",
+      "diagnostics.py",
+      "identity.py",
+      "physics.py",
+      "reference_case.py",
+      "reference.py",
+      "worker.py",
+      "assets/reference_pendulum.xml"
+    ]
+  },
+  "candidate_identity": {
+    "file_count": 13,
+    "platforms": {
+      "linux-x86-64": {
+        "implementation_digest": "9ea31547f2246e2a8eedcaefcac8ae767086711c96ad79d5da835f72e5bc2ea1",
+        "payload": {
+          "adapter_id": "dynamisbench.mujoco.reference",
+          "adapter_version": "0.1.0",
+          "capabilities": [
+            "forward_dynamics"
+          ],
+          "dependency_closure": {
+            "digest": "6a2f7ad6b36c71ac3c17466934843666efe35d743502be64837bb322f8275d5c",
+            "lockfile_sha256": "f939e54b030cbd02c11a346867744340c1e1ccd8f9fbf74432640a0b0fcd4c99",
+            "packages": [
+              [
+                "absl-py",
+                "2.5.1"
+              ],
+              [
+                "annotated-doc",
+                "0.0.5"
+              ],
+              [
+                "annotated-types",
+                "0.8.0"
+              ],
+              [
+                "anyio",
+                "4.15.1"
+              ],
+              [
+                "click",
+                "8.5.0"
+              ],
+              [
+                "dynamisbench",
+                "0.0.0"
+              ],
+              [
+                "etils",
+                "1.14.0"
+              ],
+              [
+                "fastapi",
+                "0.162.0"
+              ],
+              [
+                "fsspec",
+                "2026.9.0"
+              ],
+              [
+                "glfw",
+                "2.11.0"
+              ],
+              [
+                "h11",
+                "0.16.0"
+              ],
+              [
+                "idna",
+                "3.20"
+              ],
+              [
+                "mujoco",
+                "3.17.0"
+              ],
+              [
+                "numpy",
+                "2.5.4"
+              ],
+              [
+                "opentelemetry-api",
+                "1.45.1"
+              ],
+              [
+                "pyarrow",
+                "26.0.0"
+              ],
+              [
+                "pydantic",
+                "2.14.1"
+              ],
+              [
+                "pydantic-core",
+                "2.50.1"
+              ],
+              [
+                "pyopengl",
+                "3.1.10"
+              ],
+              [
+                "pyyaml",
+                "6.0.3"
+              ],
+              [
+                "rfc8785",
+                "0.1.4"
+              ],
+              [
+                "starlette",
+                "1.10.0"
+              ],
+              [
+                "typing-extensions",
+                "4.16.0"
+              ],
+              [
+                "typing-inspection",
+                "0.4.4"
+              ],
+              [
+                "uvicorn",
+                "0.54.0"
+              ],
+              [
+                "websockets",
+                "17.3"
+              ],
+              [
+                "zipp",
+                "4.1.2"
+              ]
+            ],
+            "schema": "dynamisbench.mujoco.dependency-closure/1"
+          },
+          "engine": "mujoco",
+          "engine_version": "3.17.0",
+          "model_sha256": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+          "platform": "linux-x86-64",
+          "production_entry_manifest": [
+            {
+              "path": "dynamisbench/adapters/mujoco/protected_contracts.py",
+              "sha256": "413e31ba87ffbedceb4392e1b4a3c1272caf28e880073f5f5856cebf2a56ca5b"
+            },
+            {
+              "path": "dynamisbench/adapters/mujoco/protected_worker.py",
+              "sha256": "f3367448464e3bd2b0db91712fdea2513416faad32a3a7806fee05a9e8799afe"
+            },
+            {
+              "path": "dynamisbench/execution/protected_bootstrap.py",
+              "sha256": "10a8644077d774f07b7637f1c0b7366c6cb317b38742da7a994ef38a3df62f39"
+            }
+          ],
+          "protocol_version": 1,
+          "python_version": "3.12.13",
+          "schema": "dynamisbench.mujoco.implementation-identity/2",
+          "source_manifest": [
+            {
+              "path": "__init__.py",
+              "sha256": "4cf2b62879700ba32cf02e26282116a32939c3d507742af0ee2f2c9143a5bb0d"
+            },
+            {
+              "path": "__main__.py",
+              "sha256": "9fdc8da19521be27fb0fe0728b1b23ce3bcb06f10a16203bdcfaccf976742ddf"
+            },
+            {
+              "path": "assets/reference_pendulum.xml",
+              "sha256": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd"
+            },
+            {
+              "path": "dependencies.py",
+              "sha256": "800c607083f905f51f79a3c9cb6be721cd3f1a72837e77edbad3824622ab6507"
+            },
+            {
+              "path": "diagnostics.py",
+              "sha256": "4eb8ed9d9bde8a2e2ac4feb17feeea2423a42bb1e19853773abf5c703f2a80e2"
+            },
+            {
+              "path": "identity.py",
+              "sha256": "31b8d6657a98658c424e5940c8fb82ce1401b6b97c770804339b718a48bc0959"
+            },
+            {
+              "path": "physics.py",
+              "sha256": "dc5863387a42299fee3dbb1f2f79402404aa63b97fe13ef1216fa4fc455fee95"
+            },
+            {
+              "path": "reference.py",
+              "sha256": "a2b85244ed6df8981ef25d16626f927dd75bfa180b603ae3dd5ff523c78f20bb"
+            },
+            {
+              "path": "reference_case.py",
+              "sha256": "7078b12a9ba801f039408bdcc08e4bf048363b17c3accbd5dcc81e2d7b004d42"
+            },
+            {
+              "path": "worker.py",
+              "sha256": "00e9c6de60e4d2b35018c67e3d6d53fcf7ddabfcc1c0ef92798bac92415c7e96"
+            }
+          ]
+        }
+      },
+      "windows-x86-64": {
+        "implementation_digest": "86d5e912fa876208e156bfe13f91be6a5cfde7f0aefcc9e0bbf3aedbc7051f20",
+        "payload": {
+          "adapter_id": "dynamisbench.mujoco.reference",
+          "adapter_version": "0.1.0",
+          "capabilities": [
+            "forward_dynamics"
+          ],
+          "dependency_closure": {
+            "digest": "6a2f7ad6b36c71ac3c17466934843666efe35d743502be64837bb322f8275d5c",
+            "lockfile_sha256": "f939e54b030cbd02c11a346867744340c1e1ccd8f9fbf74432640a0b0fcd4c99",
+            "packages": [
+              [
+                "absl-py",
+                "2.5.1"
+              ],
+              [
+                "annotated-doc",
+                "0.0.5"
+              ],
+              [
+                "annotated-types",
+                "0.8.0"
+              ],
+              [
+                "anyio",
+                "4.15.1"
+              ],
+              [
+                "click",
+                "8.5.0"
+              ],
+              [
+                "dynamisbench",
+                "0.0.0"
+              ],
+              [
+                "etils",
+                "1.14.0"
+              ],
+              [
+                "fastapi",
+                "0.162.0"
+              ],
+              [
+                "fsspec",
+                "2026.9.0"
+              ],
+              [
+                "glfw",
+                "2.11.0"
+              ],
+              [
+                "h11",
+                "0.16.0"
+              ],
+              [
+                "idna",
+                "3.20"
+              ],
+              [
+                "mujoco",
+                "3.17.0"
+              ],
+              [
+                "numpy",
+                "2.5.4"
+              ],
+              [
+                "opentelemetry-api",
+                "1.45.1"
+              ],
+              [
+                "pyarrow",
+                "26.0.0"
+              ],
+              [
+                "pydantic",
+                "2.14.1"
+              ],
+              [
+                "pydantic-core",
+                "2.50.1"
+              ],
+              [
+                "pyopengl",
+                "3.1.10"
+              ],
+              [
+                "pyyaml",
+                "6.0.3"
+              ],
+              [
+                "rfc8785",
+                "0.1.4"
+              ],
+              [
+                "starlette",
+                "1.10.0"
+              ],
+              [
+                "typing-extensions",
+                "4.16.0"
+              ],
+              [
+                "typing-inspection",
+                "0.4.4"
+              ],
+              [
+                "uvicorn",
+                "0.54.0"
+              ],
+              [
+                "websockets",
+                "17.3"
+              ],
+              [
+                "zipp",
+                "4.1.2"
+              ]
+            ],
+            "schema": "dynamisbench.mujoco.dependency-closure/1"
+          },
+          "engine": "mujoco",
+          "engine_version": "3.17.0",
+          "model_sha256": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+          "platform": "windows-x86-64",
+          "production_entry_manifest": [
+            {
+              "path": "dynamisbench/adapters/mujoco/protected_contracts.py",
+              "sha256": "413e31ba87ffbedceb4392e1b4a3c1272caf28e880073f5f5856cebf2a56ca5b"
+            },
+            {
+              "path": "dynamisbench/adapters/mujoco/protected_worker.py",
+              "sha256": "f3367448464e3bd2b0db91712fdea2513416faad32a3a7806fee05a9e8799afe"
+            },
+            {
+              "path": "dynamisbench/execution/protected_bootstrap.py",
+              "sha256": "10a8644077d774f07b7637f1c0b7366c6cb317b38742da7a994ef38a3df62f39"
+            }
+          ],
+          "protocol_version": 1,
+          "python_version": "3.12.13",
+          "schema": "dynamisbench.mujoco.implementation-identity/2",
+          "source_manifest": [
+            {
+              "path": "__init__.py",
+              "sha256": "4cf2b62879700ba32cf02e26282116a32939c3d507742af0ee2f2c9143a5bb0d"
+            },
+            {
+              "path": "__main__.py",
+              "sha256": "9fdc8da19521be27fb0fe0728b1b23ce3bcb06f10a16203bdcfaccf976742ddf"
+            },
+            {
+              "path": "assets/reference_pendulum.xml",
+              "sha256": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd"
+            },
+            {
+              "path": "dependencies.py",
+              "sha256": "800c607083f905f51f79a3c9cb6be721cd3f1a72837e77edbad3824622ab6507"
+            },
+            {
+              "path": "diagnostics.py",
+              "sha256": "4eb8ed9d9bde8a2e2ac4feb17feeea2423a42bb1e19853773abf5c703f2a80e2"
+            },
+            {
+              "path": "identity.py",
+              "sha256": "31b8d6657a98658c424e5940c8fb82ce1401b6b97c770804339b718a48bc0959"
+            },
+            {
+              "path": "physics.py",
+              "sha256": "dc5863387a42299fee3dbb1f2f79402404aa63b97fe13ef1216fa4fc455fee95"
+            },
+            {
+              "path": "reference.py",
+              "sha256": "a2b85244ed6df8981ef25d16626f927dd75bfa180b603ae3dd5ff523c78f20bb"
+            },
+            {
+              "path": "reference_case.py",
+              "sha256": "7078b12a9ba801f039408bdcc08e4bf048363b17c3accbd5dcc81e2d7b004d42"
+            },
+            {
+              "path": "worker.py",
+              "sha256": "00e9c6de60e4d2b35018c67e3d6d53fcf7ddabfcc1c0ef92798bac92415c7e96"
+            }
+          ]
+        }
+      }
+    },
+    "production_entry_files": [
+      "dynamisbench/adapters/mujoco/protected_contracts.py",
+      "dynamisbench/adapters/mujoco/protected_worker.py",
+      "dynamisbench/execution/protected_bootstrap.py"
+    ],
+    "schema": "dynamisbench.mujoco.implementation-identity/2",
+    "source_files": [
+      "__init__.py",
+      "__main__.py",
+      "assets/reference_pendulum.xml",
+      "dependencies.py",
+      "diagnostics.py",
+      "identity.py",
+      "physics.py",
+      "reference.py",
+      "reference_case.py",
+      "worker.py"
+    ]
+  },
+  "declaration": "Owner conditionally accepted both 13-file schema-2 digests for the fixed MuJoCo reference on 2026-11-26. The protected supervisor verifies schema-2 in addition to the preserved protocol-v1 10-file worker identity. Human review and merge remain blocked.",
+  "dependency_closure_digest": "6a2f7ad6b36c71ac3c17466934843666efe35d743502be64837bb322f8275d5c",
+  "schema": "dynamisbench.res555.adapter-manifest-candidate/1",
+  "status": "owner-accepted-conditional-dual-binding"
+}

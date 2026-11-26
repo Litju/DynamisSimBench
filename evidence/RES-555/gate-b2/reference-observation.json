@@ -1,0 +1,13 @@
+{
+  "schema": "dynamisbench.res555.reference-observation/1",
+  "source": "existing RES-550 packaged-path MuJoCo reference qualification, reproduced by the exact-head Gate B2 receipts",
+  "model_sha256": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+  "steps": 2000,
+  "timestep_s": 0.001,
+  "duration_s": 2.0,
+  "trajectory_sha256": "f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf",
+  "expected_final_angle_rad": 0.5192097890514507,
+  "expected_final_angular_velocity_rad_s": 0.2069654165048836,
+  "expected_energy_initial_j": 1.3138419739773342,
+  "expected_energy_final_j": 1.3138419739773048
+}

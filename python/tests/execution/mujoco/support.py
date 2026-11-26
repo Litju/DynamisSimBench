@@ -274,6 +274,15 @@ def run_nonfinite_probe(scratch: Path) -> dict[str, Any]:
     )
 
 
+def run_materialized_parity(scratch: Path) -> dict[str, Any]:
+    """Run the materialized-compiler versus packaged-path parity observation."""
+    return _run_worker_module(
+        "dynamisbench.adapters.mujoco.qualification",
+        ("--materialized-parity",),
+        scratch,
+    )
+
+
 def adapter_identity(identity: dict[str, Any]) -> WorkerAdapterIdentity:
     """Build the protocol adapter identity from the installed worker's own report."""
     return WorkerAdapterIdentity(

@@ -35,6 +35,7 @@ __all__ = [
     "PhysicsError",
     "ReferenceRun",
     "RunContext",
+    "compile_model",
     "engine_version",
     "hinge_parameters",
     "load_model",
@@ -190,6 +191,26 @@ def load_model() -> mujoco.MjModel:
         model = mujoco.MjModel.from_xml_string(xml)
     except Exception as error:
         raise PhysicsError(f"MuJoCo refused the reviewed reference model: {error}") from error
+    _verify_model(model)
+    return model
+
+
+def compile_model(xml_bytes: bytes) -> mujoco.MjModel:
+    """Compile exact caller-supplied XML bytes and verify the reviewed model structure.
+
+    This is the materialized-input compiler used by the RES-555 Gate B2 probe. It never
+    reads the packaged model resource and never chooses a fallback: the caller supplies the
+    exact bytes that were verified against the admitted manifest. The existing
+    :func:`load_model` remains the packaged diagnostic path.
+    """
+    try:
+        xml = xml_bytes.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise PhysicsError("the materialized model is not UTF-8 XML") from error
+    try:
+        model = mujoco.MjModel.from_xml_string(xml)
+    except Exception as error:
+        raise PhysicsError(f"MuJoCo refused the materialized model: {error}") from error
     _verify_model(model)
     return model
 

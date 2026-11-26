@@ -1,0 +1,892 @@
+"""Worker entry point for the protected pinned-reference production route.
+
+The protected bootstrap launches this module only after the fixed source closure, the
+input view, the sandbox profile and the resource limits are pinned. The worker first proves
+the request is the compiled reference authority, then verifies the exact input view, compiles
+the view bytes with the pinned MuJoCo release, runs the existing 2,000-step reference, checks
+the committed trajectory, and writes a bounded consumption receipt into its scratch directory.
+
+It does not write staging, sealed evidence, ``native/``, canonical quantities or an
+assessment. The receipt is an untrusted sidecar; the supervisor's correlation and external
+observations are the admissibility evidence. The production supervisor, preflight, API and CLI
+do not import this module; it is launched as the fixed worker program.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import stat
+import sys
+from pathlib import Path
+from typing import Any, Final, Literal
+
+_MAX_CONFIG_BYTES: Final = 64 * 1024
+_MAX_FAILURE: Final = 240
+
+
+def _bounded_text(error: BaseException) -> str:
+    text = f"{type(error).__name__}: {error}"
+    return text[:_MAX_FAILURE]
+
+
+def _load_config() -> dict[str, Any]:
+    path = Path.cwd() / "sandbox.json"
+    from hashlib import sha256
+
+    from dynamisbench.adapters.mujoco.protected_contracts import read_bounded_regular
+
+    raw = read_bounded_regular(path, limit=_MAX_CONFIG_BYTES)
+    expected = os.environ.get("DYNAMISBENCH_PROTECTED_CONFIG_SHA256", "")
+    if not expected or len(expected) != 64 or sha256(raw).hexdigest() != expected:
+        raise ValueError("sandbox.json is not the supervisor-pinned protected configuration")
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("sandbox.json is not an object")
+    if value.get("schema") != "dynamisbench.protected.sandbox/1":
+        raise ValueError("sandbox.json is not the protected configuration")
+    return value
+
+
+def _read_request():
+    from dynamisbench.execution.contracts import (
+        MAX_WORKER_MESSAGE_BYTES,
+        WorkerProtocolError,
+        parse_worker_request,
+    )
+
+    raw = sys.stdin.buffer.read(MAX_WORKER_MESSAGE_BYTES + 1)
+    if len(raw) > MAX_WORKER_MESSAGE_BYTES:
+        raise WorkerProtocolError("the request exceeds the worker protocol message bound")
+    return parse_worker_request(raw)
+
+
+def _write_stdout(payload: bytes) -> None:
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+
+
+def _write_stderr(line: str) -> None:
+    sys.stderr.write(line.rstrip("\n") + "\n")
+    sys.stderr.flush()
+
+
+def _response(request, status: str, message: str | None):
+    from dynamisbench.execution.contracts import WorkerResponse, WorkerStatus
+
+    return WorkerResponse(
+        run_id=request.run_id,
+        execution_fingerprint=request.execution_fingerprint,
+        environment=request.environment,
+        adapter=request.adapter,
+        status=WorkerStatus.COMPLETED if status == "completed" else WorkerStatus.FAILED,
+        message=message,
+    )
+
+
+def _write_response(request, status: str, message: str | None) -> None:
+    from dynamisbench.identity import canonical_semantic_bytes
+
+    _write_stdout(canonical_semantic_bytes(_response(request, status, message)) + b"\n")
+
+
+def _probe_read(path: str, name: str, *, expectation: Literal["allowed", "denied"] = "denied"):
+    from dynamisbench.adapters.mujoco.protected_contracts import (
+        ProbeObservation,
+        read_bounded_regular,
+    )
+
+    try:
+        read_bounded_regular(Path(path), limit=4096)
+    except PermissionError:
+        return ProbeObservation(
+            name=name,
+            expectation=expectation,
+            observed="denied",
+            detail="PermissionError",
+        )
+    except OSError as error:
+        return ProbeObservation(
+            name=name,
+            expectation=expectation,
+            observed="error",
+            detail=type(error).__name__,
+        )
+    except Exception as error:  # noqa: BLE001 - a probe records a bounded observation
+        return ProbeObservation(
+            name=name,
+            expectation=expectation,
+            observed="error",
+            detail=type(error).__name__,
+        )
+    return ProbeObservation(
+        name=name,
+        expectation=expectation,
+        observed="allowed",
+        detail="read succeeded",
+    )
+
+
+def _probe_write(path: str, name: str):
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
+
+    try:
+        with open(path, "xb") as handle:
+            handle.write(b"res555-forbidden-write")
+    except PermissionError:
+        return ProbeObservation(
+            name=name, expectation="denied", observed="denied", detail="PermissionError"
+        )
+    except OSError as error:
+        winerror = getattr(error, "winerror", None)
+        if error.errno == 13 or winerror == 5:
+            return ProbeObservation(
+                name=name, expectation="denied", observed="denied", detail="access denied"
+            )
+        return ProbeObservation(
+            name=name, expectation="denied", observed="error", detail=type(error).__name__
+        )
+    return ProbeObservation(
+        name=name, expectation="denied", observed="allowed", detail="write succeeded"
+    )
+
+
+def _probe_delete(path: str, name: str):
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
+
+    try:
+        os.unlink(path)
+    except PermissionError:
+        return ProbeObservation(
+            name=name, expectation="denied", observed="denied", detail="PermissionError"
+        )
+    except OSError as error:
+        winerror = getattr(error, "winerror", None)
+        if error.errno == 13 or winerror == 5:
+            return ProbeObservation(
+                name=name, expectation="denied", observed="denied", detail="access denied"
+            )
+        return ProbeObservation(
+            name=name, expectation="denied", observed="error", detail=type(error).__name__
+        )
+    return ProbeObservation(
+        name=name, expectation="denied", observed="allowed", detail="unlink succeeded"
+    )
+
+
+def _probe_tcp(port: int):
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
+
+    sock: socket.socket | None = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(3.0)
+        sock.connect(("127.0.0.1", port))
+    except PermissionError:
+        return ProbeObservation(
+            name="network_connect",
+            expectation="denied",
+            observed="denied",
+            detail="PermissionError",
+        )
+    except OSError as error:
+        winerror = getattr(error, "winerror", None)
+        # A failed connect is the denial observation. The supervisor's localhost canary
+        # independently proves that no connection arrived; a closed port alone would not.
+        return ProbeObservation(
+            name="network_connect",
+            expectation="denied",
+            observed="denied",
+            detail=f"{type(error).__name__}:{error.errno or winerror}",
+        )
+    finally:
+        if sock is not None:
+            sock.close()
+    return ProbeObservation(
+        name="network_connect", expectation="denied", observed="allowed", detail="connect succeeded"
+    )
+
+
+def _probe_udp(port: int):
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
+
+    sock: socket.socket | None = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sent = sock.sendto(b"RES555-UDP", ("127.0.0.1", port))
+    except PermissionError:
+        return ProbeObservation(
+            name="network_udp",
+            expectation="denied",
+            observed="denied",
+            detail="PermissionError",
+        )
+    except OSError as error:
+        return ProbeObservation(
+            name="network_udp",
+            expectation="denied",
+            observed="denied",
+            detail=type(error).__name__,
+        )
+    finally:
+        if sock is not None:
+            sock.close()
+    # A successful sendto is not delivery evidence. The supervisor's UDP canary is the
+    # observation that no datagram arrived; Windows AppContainer accepts sendto and drops it.
+    return ProbeObservation(
+        name="network_udp",
+        expectation="denied",
+        observed="allowed",
+        detail=f"sendto returned {sent}; delivery is measured by the supervisor",
+    )
+
+
+def _probe_raw():
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
+        try:
+            sock.sendto(b"RES555-RAW", ("127.0.0.1", 9))
+        finally:
+            sock.close()
+    except PermissionError:
+        return ProbeObservation(
+            name="network_raw",
+            expectation="denied",
+            observed="denied",
+            detail="PermissionError",
+        )
+    except OSError as error:
+        return ProbeObservation(
+            name="network_raw",
+            expectation="denied",
+            observed="denied",
+            detail=type(error).__name__,
+        )
+    return ProbeObservation(
+        name="network_raw",
+        expectation="denied",
+        observed="allowed",
+        detail="raw socket creation and send both succeeded",
+    )
+
+
+def _probe_unix(path: str | None):
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
+
+    unix_family = getattr(socket, "AF_UNIX", None)
+    if path is None or unix_family is None:
+        return ProbeObservation(
+            name="network_unix",
+            expectation="denied",
+            observed="error",
+            detail="AF_UNIX is unavailable in this interpreter",
+        )
+    try:
+        sock = socket.socket(unix_family, socket.SOCK_STREAM)
+        try:
+            sock.connect(path)
+        finally:
+            sock.close()
+    except PermissionError:
+        return ProbeObservation(
+            name="network_unix",
+            expectation="denied",
+            observed="denied",
+            detail="PermissionError",
+        )
+    except OSError as error:
+        return ProbeObservation(
+            name="network_unix",
+            expectation="denied",
+            observed="denied",
+            detail=type(error).__name__,
+        )
+    return ProbeObservation(
+        name="network_unix",
+        expectation="denied",
+        observed="allowed",
+        detail="Unix-domain connect succeeded",
+    )
+
+
+def _probe_socketpair():
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
+
+    try:
+        left, right = socket.socketpair()
+        left.close()
+        right.close()
+    except PermissionError:
+        return ProbeObservation(
+            name="network_socketpair",
+            expectation="denied",
+            observed="denied",
+            detail="PermissionError",
+        )
+    except OSError as error:
+        return ProbeObservation(
+            name="network_socketpair",
+            expectation="denied",
+            observed="denied",
+            detail=type(error).__name__,
+        )
+    return ProbeObservation(
+        name="network_socketpair",
+        expectation="denied",
+        observed="allowed",
+        detail="socketpair succeeded",
+    )
+
+
+def _probe_io_uring():
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
+
+    if os.name == "nt":
+        return ProbeObservation(
+            name="io_uring_setup",
+            expectation="denied",
+            observed="error",
+            detail="io_uring is not applicable on Windows",
+        )
+    import ctypes
+
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        result = int(libc.syscall(425, 0, 0))
+    except BaseException as error:  # noqa: BLE001 - a probe records a bounded observation
+        return ProbeObservation(
+            name="io_uring_setup",
+            expectation="denied",
+            observed="error",
+            detail=type(error).__name__,
+        )
+    if result < 0 and ctypes.get_errno() == 1:  # EPERM: the seccomp policy denied it
+        return ProbeObservation(
+            name="io_uring_setup",
+            expectation="denied",
+            observed="denied",
+            detail="EPERM",
+        )
+    if result < 0:
+        return ProbeObservation(
+            name="io_uring_setup",
+            expectation="denied",
+            observed="error",
+            detail=f"the syscall was not denied by seccomp (errno {ctypes.get_errno()})",
+        )
+    return ProbeObservation(
+        name="io_uring_setup",
+        expectation="denied",
+        observed="allowed",
+        detail="io_uring_setup returned a descriptor",
+    )
+
+
+def _probe_inherited_sockets():
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
+
+    if os.name == "nt":
+        return ProbeObservation(
+            name="inherited_sockets",
+            expectation="denied",
+            observed="error",
+            detail="the Windows descriptor table is checked by the supervisor's handle list",
+        )
+    sockets: list[str] = []
+    try:
+        names = os.listdir("/proc/self/fd")
+    except OSError as error:
+        return ProbeObservation(
+            name="inherited_sockets",
+            expectation="denied",
+            observed="error",
+            detail=type(error).__name__,
+        )
+    for name in names:
+        try:
+            descriptor = int(name)
+            info = os.fstat(descriptor)
+        except (OSError, ValueError):
+            continue
+        if stat.S_ISSOCK(info.st_mode):
+            sockets.append(name)
+    if sockets:
+        return ProbeObservation(
+            name="inherited_sockets",
+            expectation="denied",
+            observed="allowed",
+            detail="socket descriptors: " + ",".join(sorted(sockets))[:120],
+        )
+    return ProbeObservation(
+        name="inherited_sockets",
+        expectation="denied",
+        observed="denied",
+        detail="no socket descriptors",
+    )
+
+
+def _probe_allowed_write(target: str, token: str):
+    from dynamisbench.adapters.mujoco.protected_contracts import (
+        ProbeObservation,
+        read_bounded_regular,
+    )
+
+    try:
+        with open(target, "xb") as handle:
+            handle.write(token.encode("utf-8"))
+        observed = read_bounded_regular(Path(target), limit=4096).decode("utf-8")
+    except Exception as error:  # noqa: BLE001 - a probe records a bounded observation
+        return ProbeObservation(
+            name="scratch_write",
+            expectation="allowed",
+            observed="error",
+            detail=type(error).__name__,
+        )
+    if observed != token:
+        return ProbeObservation(
+            name="scratch_write", expectation="allowed", observed="error", detail="content mismatch"
+        )
+    return ProbeObservation(
+        name="scratch_write", expectation="allowed", observed="allowed", detail="exact bytes"
+    )
+
+
+def _probes(config: dict[str, Any], targets, inputs_root: Path):
+    from dynamisbench.adapters.mujoco import reference
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbeObservation
+
+    observations = [
+        _probe_read(targets.allowed_read, "allowed_input_read", expectation="allowed"),
+        _probe_allowed_write(targets.allowed_write, targets.write_token),
+        _probe_tcp(targets.network_port),
+        _probe_udp(targets.network_udp_port),
+        _probe_raw(),
+        _probe_unix(targets.network_unix_path),
+        _probe_socketpair(),
+        _probe_io_uring(),
+        _probe_inherited_sockets(),
+        _probe_write(targets.runtime_write, "runtime_write"),
+    ]
+    observations.extend(
+        _probe_read(path, f"forbidden_read_{index}")
+        for index, path in enumerate(targets.forbidden_reads)
+    )
+    observations.extend(
+        _probe_write(path, f"forbidden_write_{index}")
+        for index, path in enumerate(targets.forbidden_writes)
+    )
+    observations.extend(
+        _probe_delete(path, f"forbidden_delete_{index}")
+        for index, path in enumerate(targets.forbidden_deletes)
+    )
+    package_path = Path(reference.__file__).resolve().parent / reference.MODEL_ASSET_PATH
+    package_present = package_path.exists()
+    try:
+        reference.model_bytes()
+    except reference.ReferenceModelError:
+        observations.append(
+            ProbeObservation(
+                name="package_model_asset",
+                expectation="denied",
+                observed="denied",
+                detail=(
+                    "the packaged XML is present but not the reviewed bytes"
+                    if package_present
+                    else "the packaged XML is absent from the sandbox"
+                ),
+            )
+        )
+    except Exception as error:  # noqa: BLE001
+        observations.append(
+            ProbeObservation(
+                name="package_model_asset",
+                expectation="denied",
+                observed="error",
+                detail=type(error).__name__,
+            )
+        )
+    else:
+        observations.append(
+            ProbeObservation(
+                name="package_model_asset",
+                expectation="denied",
+                observed="allowed",
+                detail="the packaged XML was readable",
+            )
+        )
+    return tuple(observations)
+
+
+def _import_audit(*, site_packages: Path, source_root: Path, base_prefix: Path):
+    from dynamisbench.adapters.mujoco.protected_contracts import ImportedModule
+
+    audited: list[ImportedModule] = []
+    for name in ("dynamisbench", "pydantic", "mujoco", "numpy"):
+        module = sys.modules.get(name)
+        if module is None:
+            continue
+        filename = getattr(module, "__file__", None)
+        if not filename:
+            continue
+        resolved = Path(filename).resolve()
+        under = any(
+            resolved.is_relative_to(root.resolve())
+            for root in (site_packages, source_root, base_prefix)
+        )
+        audited.append(ImportedModule(module=name, file=str(resolved), under_runtime=bool(under)))
+    return tuple(audited)
+
+
+def _run_materialized(
+    config: dict[str, Any],
+    request,
+    view,
+    identity,
+    *,
+    package_asset_denied: bool,
+):
+    from dynamisbench.adapters.mujoco import reference
+    from dynamisbench.adapters.mujoco.protected_contracts import ProbePolicyError
+
+    # The protected worker is headless. This is also set by the generated bootstrap before
+    # any scientific import; setting it here keeps a direct worker invocation headless too.
+    # It prevents MuJoCo's PyGLFW import from spawning a helper Python process.
+    os.environ["MUJOCO_GL"] = "disable"
+    if view.asset_sha256 != reference.MODEL_SHA256:
+        raise ProbePolicyError("the input-view model is not the reviewed reference XML")
+    from dynamisbench.adapters.mujoco.protected_contracts import reconstruct_implementation_digest
+
+    digest, source_manifest = reconstruct_implementation_digest(
+        model_sha256=view.asset_sha256,
+        source_root=Path(config["source_root"]),
+        engine_version=request.adapter.engine_version,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        platform_tag=reference.platform_tag(),
+    )
+    if digest != request.adapter.implementation_digest:
+        raise ProbePolicyError(
+            "the sandbox adapter source does not reproduce the request implementation digest"
+        )
+
+    from dynamisbench.adapters.mujoco import physics
+
+    if physics.engine_version() != request.adapter.engine_version:
+        raise ProbePolicyError("the installed MuJoCo version is not the requested engine version")
+    try:
+        model = physics.compile_model(view.model_bytes)
+    except reference.ReferenceAdapterError as error:
+        raise ProbePolicyError(
+            f"the pinned compiler refused the input-view XML: {error}"
+        ) from error
+
+    original_model_bytes = reference.model_bytes
+    original_load_model = physics.load_model
+
+    def forbidden(*_args: object, **_kwargs: object):
+        raise reference.ReferenceModelError(
+            "the packaged model is forbidden during materialized execution"
+        )
+
+    def from_view():
+        return model
+
+    context = physics.RunContext(
+        run_id=str(request.run_id),
+        execution_fingerprint=request.execution_fingerprint.hex,
+        benchmark=str(request.run_spec.benchmark.identifier),
+        scenario=str(request.run_spec.scenario.identifier),
+        realization=str(request.run_spec.realization.identifier),
+        environment_id=str(request.run_spec.environment.identifier),
+        seed=request.run_spec.seed,
+        outcomes=tuple(str(outcome) for outcome in request.run_spec.outcomes),
+        adapter_version=str(request.adapter.adapter_version),
+        engine_version=str(request.adapter.engine_version),
+        implementation_digest=str(request.adapter.implementation_digest),
+    )
+    try:
+        reference.model_bytes = forbidden
+        physics.load_model = from_view
+        run = physics.run_reference(context)
+    finally:
+        reference.model_bytes = original_model_bytes
+        physics.load_model = original_load_model
+
+    diagnostic = run.diagnostic
+    if diagnostic.steps != reference.STEPS:
+        raise ProbePolicyError("the reference run did not execute the pinned 2,000 steps")
+    from dynamisbench.adapters.mujoco.protected_contracts import (
+        ModelConsumption,
+        PhysicsObservation,
+    )
+
+    mass, distance, inertia = physics.hinge_parameters(model)
+    package_path = Path(reference.__file__).resolve().parent / reference.MODEL_ASSET_PATH
+    model_consumption = ModelConsumption(
+        logical_path=view.asset_path,
+        size_bytes=view.asset_size_bytes,
+        sha256=view.asset_sha256,
+        package_asset_present=package_path.exists(),
+        package_asset_probe="denied" if package_asset_denied else "allowed",
+        compiled={
+            "nq": int(model.nq),
+            "nv": int(model.nv),
+            "nu": int(model.nu),
+            "njnt": int(model.njnt),
+            "ngeom": int(model.ngeom),
+            "nbody": int(model.nbody),
+            "mass_kg": mass,
+            "com_distance_m": distance,
+            "hinge_inertia_kg_m2": inertia,
+            "timestep_s": float(model.opt.timestep),
+            "solver_tolerance": float(model.opt.tolerance),
+        },
+    )
+    from dynamisbench.identity import semantic_sha256
+
+    diagnostic_digest = semantic_sha256(diagnostic.model_dump(mode="json")).hex
+    physics_observation = PhysicsObservation(
+        diagnostic_sha256=diagnostic_digest,
+        steps=diagnostic.steps,
+        timestep_s=diagnostic.timestep_s,
+        duration_s=diagnostic.duration_s,
+        trajectory_sha256=diagnostic.trajectory_sha256,
+        initial_time_s=diagnostic.initial.time_s,
+        final_time_s=diagnostic.final.time_s,
+        final_angle_rad=diagnostic.final.angle_rad,
+        final_angular_velocity_rad_s=diagnostic.final.angular_velocity_rad_s,
+        energy_initial_j=diagnostic.energy_initial_j,
+        energy_final_j=diagnostic.energy_final_j,
+        max_relative_energy_drift=diagnostic.max_relative_energy_drift,
+        all_finite=diagnostic.all_finite,
+    )
+    return model_consumption, physics_observation, source_manifest
+
+
+def _run(config: dict[str, Any], request):
+    from dynamisbench.adapters.mujoco import dependencies
+    from dynamisbench.adapters.mujoco.protected_contracts import (
+        MAX_RECEIPT_BYTES,
+        ConsumptionReceipt,
+        ProbeTargets,
+        WorkerRuntimeSummary,
+        measure_runtime_identity,
+        read_bounded_regular,
+        sha256_bytes,
+        sha256_file,
+        verify_view,
+        write_canonical_atomic,
+    )
+
+    inputs_root = Path(config["inputs"])
+    scratch = Path(config["scratch"])
+    binding_bytes = read_bounded_regular(inputs_root / "binding.json", limit=4096)
+    view = verify_view(inputs_root, request)
+    target_bytes = read_bounded_regular(scratch / "probe-targets.json", limit=64 * 1024)
+    targets = ProbeTargets.model_validate_json(target_bytes)
+
+    identity = measure_runtime_identity(
+        executable=Path(sys.executable),
+        base_prefix=Path(config["base_prefix"]),
+        site_packages=Path(config["site_packages"]),
+        source_root=Path(config["source_root"]),
+        model_asset_relative="assets/reference_pendulum.xml",
+    )
+    venv_config_sha256 = config.get("venv_config_sha256")
+    venv_config_path = config.get("venv_config_path")
+    if venv_config_path:
+        _, observed_venv = sha256_file(Path(str(venv_config_path)), max_bytes=256 * 1024)
+        if observed_venv != venv_config_sha256:
+            raise ValueError("the selected pyvenv.cfg does not match the pinned closure")
+    from dynamisbench.execution.protected_runtime import protected_runtime_digest
+
+    protected_digest = protected_runtime_digest(identity, venv_config_sha256)
+    if protected_digest != config["runtime_closure_sha256"]:
+        raise ValueError("the worker runtime does not match the supervisor-measured closure")
+    if view.binding.runtime_closure_sha256 != protected_digest:
+        raise ValueError("the input binding does not commit to this worker runtime")
+    if view.binding.isolation_profile_sha256 != config["profile_sha256"]:
+        raise ValueError("the input binding does not commit to this isolation profile")
+
+    probes = _probes(config, targets, inputs_root)
+    # A successful Windows sendto is not delivery evidence; the supervisor's UDP canary is.
+    # The Windows descriptor table is likewise checked by the supervisor's handle list, not
+    # by a POSIX /proc walk. Those two observations are recorded but do not gate the worker.
+    informational = (
+        {
+            "network_udp",
+            "network_unix",
+            "network_socketpair",
+            "io_uring_setup",
+            "inherited_sockets",
+        }
+        if os.name == "nt"
+        else set()
+    )
+    failed = [
+        probe.name for probe in probes if not probe.passed and probe.name not in informational
+    ]
+    if failed:
+        raise ValueError("an inside-worker isolation probe did not hold: " + ", ".join(failed))
+
+    mode = config["mode"]
+    if mode == "materialized-mujoco":
+        # The accepted diagnostic worker's authority check is the same compiled-reference
+        # check this route requires. It runs before the model is compiled or physics starts.
+        from dynamisbench.adapters.mujoco.worker import _verify_reference_authority
+
+        _verify_reference_authority(request)
+        model, physics_observation, source_manifest = _run_materialized(
+            config,
+            request,
+            view,
+            identity,
+            package_asset_denied=any(
+                probe.name == "package_model_asset" and probe.observed == "denied"
+                for probe in probes
+            ),
+        )
+        expected_trajectory = config.get("reference_trajectory_sha256")
+        if (
+            not isinstance(expected_trajectory, str)
+            or len(expected_trajectory) != 64
+            or physics_observation is None
+            or physics_observation.trajectory_sha256 != expected_trajectory
+        ):
+            raise ValueError("the reference run is not the committed protected trajectory")
+        engine_imported = "mujoco" in sys.modules
+    elif mode == "verify-only":
+        model = None
+        physics_observation = None
+        source_manifest = ()
+        engine_imported = bool(sys.modules.get("mujoco"))
+    else:
+        raise ValueError("sandbox.json declares an unknown probe mode")
+
+    imports = _import_audit(
+        site_packages=Path(config["site_packages"]),
+        source_root=Path(config["source_root"]),
+        base_prefix=Path(config["base_prefix"]),
+    )
+    if any(not module.under_runtime for module in imports):
+        raise ValueError("a scientific import resolved outside the measured runtime")
+    if mode == "verify-only":
+        if engine_imported:
+            raise ValueError("the verify-only probe imported the engine")
+        if not any(module.module == "dynamisbench" for module in imports):
+            raise ValueError("the verify-only probe did not import the package under test")
+
+    receipt = ConsumptionReceipt(
+        mode=mode,
+        completed=True,
+        failure=None,
+        attempt_nonce=view.binding.launch_nonce,
+        run_id=str(request.run_id),
+        execution_fingerprint=request.execution_fingerprint.hex,
+        request_sha256=view.binding.request_sha256,
+        preflight_sha256=view.binding.preflight_sha256,
+        input_manifest_sha256=view.binding.input_manifest_sha256,
+        binding_sha256=sha256_bytes(binding_bytes),
+        environment_sha256=view.binding.environment_sha256,
+        worker_selection_sha256=view.binding.worker_selection_sha256,
+        adapter_implementation_sha256=view.binding.adapter_implementation_sha256,
+        runtime_closure_sha256=protected_digest,
+        isolation_profile_sha256=view.binding.isolation_profile_sha256,
+        source_manifest=source_manifest,
+        dependency_closure_digest=dependencies.installed_closure().digest,
+        runtime_summary=WorkerRuntimeSummary(
+            executable_sha256=identity.executable_sha256,
+            base_digest=identity.base.digest,
+            site_packages_digest=identity.site_packages_closure.digest,
+            source_digest=identity.source.digest,
+            combined_digest=protected_digest,
+        ),
+        imports=imports,
+        probes=probes,
+        model=model,
+        physics=physics_observation,
+        engine_imported=engine_imported,
+    )
+    write_canonical_atomic(scratch / "consumption.json", receipt, limit=MAX_RECEIPT_BYTES)
+    return receipt
+
+
+def _write_failure_receipt(config: dict[str, Any], request, error: BaseException) -> None:
+    """Best-effort bounded failure observation; never claim completion."""
+    try:
+        from dynamisbench.adapters.mujoco.protected_contracts import (
+            MAX_RECEIPT_BYTES,
+            ConsumptionReceipt,
+            sha256_bytes,
+            write_canonical_atomic,
+        )
+
+        inputs_root = Path(config["inputs"])
+        scratch = Path(config["scratch"])
+        binding_bytes = (inputs_root / "binding.json").read_bytes()
+        from dynamisbench.execution.input_binding import WorkerInputBinding
+
+        binding = WorkerInputBinding.model_validate_json(binding_bytes)
+        receipt = ConsumptionReceipt(
+            mode=config["mode"],
+            completed=False,
+            failure=_bounded_text(error),
+            attempt_nonce=binding.launch_nonce,
+            run_id=str(request.run_id),
+            execution_fingerprint=request.execution_fingerprint.hex,
+            request_sha256=binding.request_sha256,
+            preflight_sha256=binding.preflight_sha256,
+            input_manifest_sha256=binding.input_manifest_sha256,
+            binding_sha256=sha256_bytes(binding_bytes),
+            environment_sha256=binding.environment_sha256,
+            worker_selection_sha256=binding.worker_selection_sha256,
+            adapter_implementation_sha256=binding.adapter_implementation_sha256,
+            runtime_closure_sha256=binding.runtime_closure_sha256,
+            isolation_profile_sha256=binding.isolation_profile_sha256,
+            source_manifest=(),
+            dependency_closure_digest="0" * 64,
+            imports=(),
+            probes=(),
+            model=None,
+            physics=None,
+            engine_imported="mujoco" in sys.modules,
+        )
+        write_canonical_atomic(scratch / "consumption.json", receipt, limit=MAX_RECEIPT_BYTES)
+    except Exception:  # noqa: BLE001 - a failure receipt is best effort
+        return
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run exactly one protected mode, or refuse without claiming a successful response."""
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments:
+        _write_stderr("dynamisbench protected worker: the worker accepts no arguments")
+        return 2
+    try:
+        config = _load_config()
+        request = _read_request()
+    except Exception as error:  # noqa: BLE001 - no valid request to answer
+        _write_stderr(f"dynamisbench protected probe: {_bounded_text(error)}")
+        return 2
+
+    try:
+        _run(config, request)
+    except BaseException as error:  # noqa: BLE001 - fail closed, never a false success
+        _write_failure_receipt(config, request, error)
+        message = f"protected probe refused: {type(error).__name__}"
+        _write_stderr(f"dynamisbench protected probe: {_bounded_text(error)}")
+        _write_response(request, "failed", message)
+        return 0
+
+    _write_response(
+        request,
+        "completed",
+        "protected materialized probe completed; consumption receipt written",
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

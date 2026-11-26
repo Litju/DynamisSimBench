@@ -35,10 +35,12 @@ MAX_BINDING_BYTES: Final = 4096
 class WorkerInputBinding(DomainModel):
     """A commitment retained by the trusted offline caller before view verification."""
 
-    model_config = ConfigDict(serialize_by_alias=True)
+    model_config = ConfigDict(serialize_by_alias=True, populate_by_name=True)
 
     schema_version: Literal["dynamisbench.worker-input-binding/1"] = Field(
-        default="dynamisbench.worker-input-binding/1", serialization_alias="schema"
+        default="dynamisbench.worker-input-binding/1",
+        serialization_alias="schema",
+        validation_alias="schema",
     )
     run_id: RunId
     execution_fingerprint: Sha256Hex

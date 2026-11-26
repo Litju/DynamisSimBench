@@ -172,6 +172,43 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "DYNAMISBENCH_MUJOCO_PYTHON=$worker_python" >> "$GITHUB_ENV"
           echo "DYNAMISBENCH_REQUIRE_MUJOCO=1" >> "$GITHUB_ENV"
+      # RES-555 Gate B2 requires a supervisor-owned cgroup v2 subtree and, when the host can
+      # provide one, a dedicated scratch filesystem. This is test-host provisioning: the
+      # production supervisor must get the same delegation from its service manager. A host
+      # without it fails the probe closed rather than falling back to a process group.
+      - name: Provision the RES-555 Linux containment boundary
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/sys/fs/cgroup/dynamisbench
+          sudo mkdir -p "$root/supervisor"
+          for controller in pids memory cpu; do
+            if ! grep -qw "$controller" /sys/fs/cgroup/cgroup.subtree_control; then
+              echo "+$controller" | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null
+            fi
+          done
+          for controller in pids memory cpu; do
+            if ! grep -qw "$controller" "$root/cgroup.subtree_control"; then
+              echo "+$controller" | sudo tee "$root/cgroup.subtree_control" >/dev/null
+            fi
+          done
+          grep -qw pids /sys/fs/cgroup/cgroup.subtree_control
+          grep -qw pids "$root/cgroup.subtree_control"
+          sudo chown -R "$(id -u):$(id -g)" "$root"
+          sudo umount /mnt/res555-scratch 2>/dev/null || true
+          sudo mkdir -p /mnt/res555-scratch
+          sudo mount -t tmpfs -o size=64m,nr_inodes=4096,nodev,nosuid,noexec tmpfs /mnt/res555-scratch
+          sudo chown "$(id -u):$(id -g)" /mnt/res555-scratch
+          echo "DYNAMISBENCH_CGROUP_ROOT=$root" >> "$GITHUB_ENV"
+          echo "DYNAMISBENCH_RES555_B2_SCRATCH_ROOT=/mnt/res555-scratch" >> "$GITHUB_ENV"
+          {
+            echo "### RES-555 Linux containment boundary"
+            echo
+            echo "- cgroup root: \`$root\`"
+            echo "- supervisor child: \`$root/supervisor\`"
+            echo "- dedicated scratch: \`/mnt/res555-scratch\` (64 MiB tmpfs)"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Record resolved Python toolchain
         run: |
           {
@@ -188,7 +225,13 @@ jobs:
       - name: Type check the MuJoCo adapter (Pyright)
         run: uv run pyright -p pyrightconfig.worker.json
       - name: Test (pytest + Hypothesis)
+        if: runner.os != 'Linux'
         run: uv run pytest --junitxml=evidence/pytest.xml
+        env:
+          HYPOTHESIS_PROFILE: ci
+      - name: Test (pytest + Hypothesis) in the RES-555 supervisor cgroup
+        if: runner.os == 'Linux'
+        run: bash tools/res555_gate_b2/exec_in_cgroup.sh uv run --frozen pytest --junitxml=evidence/pytest.xml
         env:
           HYPOTHESIS_PROFILE: ci
       # The columnar cold-import regression was found on Windows: concurrent first requests
@@ -229,6 +272,64 @@ jobs:
             --image-os "${ImageOS:-unknown}" \
             --image-version "${ImageVersion:-unknown}" \
             --output "evidence/mujoco-qualification-${{ matrix.name }}.json"
+      # RES-555 Gate B2 evidence, not one of the eight ADR-025 gates. It runs the probe-only
+      # harness under the platform mechanism and retains the supervisor observation. The
+      # tests fail closed if the mechanism is unavailable; there is no unprotected fallback.
+      - name: Run the RES-555 Gate B2 protected-consumption probe (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/res555_gate_b2/exec_in_cgroup.sh uv run --frozen pytest -q \
+            tests/execution/mujoco/test_b2_protected_consumption.py \
+            tests/execution/mujoco/test_b2_protected_verify_only.py \
+            tests/execution/test_b2_linux_containment.py \
+            tests/execution/test_b2_seccomp_policy.py \
+            tests/execution/test_b2_scratch_budget.py
+        env:
+          DYNAMISBENCH_RES555_B2_PROBE: "1"
+          DYNAMISBENCH_RES555_B2_EVIDENCE_DIR: "evidence/res555-gate-b2"
+      - name: Run the RES-555 Gate B2 protected-consumption probe (Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --frozen pytest -q \
+            tests/execution/mujoco/test_b2_protected_consumption.py \
+            tests/execution/mujoco/test_b2_protected_verify_only.py \
+            tests/execution/mujoco/test_b2_windows_containment.py \
+            tests/execution/test_b2_scratch_budget.py
+        env:
+          DYNAMISBENCH_RES555_B2_PROBE: "1"
+          DYNAMISBENCH_RES555_B2_EVIDENCE_DIR: "evidence/res555-gate-b2"
+      # RES-555 protected supervisor integration. The Linux job has the adopted
+      # mechanism (Landlock, seccomp, a delegated cgroup v2 subtree and a dedicated
+      # scratch tmpfs), so it must execute the pinned reference through
+      # `execute_preflighted` and fail closed if the route is unavailable. The hosted
+      # Windows runner is elevated and the adopted Windows production principal is
+      # non-elevated, so the Windows job asserts the refusal and the launch contracts
+      # instead of claiming an unqualified execution.
+      - name: Run the RES-555 protected launch contracts (Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The hosted Windows runner is elevated, so the supervisor module skips and
+          # the principal test asserts the refusal. The launch contracts still run.
+          uv run --frozen pytest -q \
+            tests/host/test_protected_windows.py \
+            tests/execution/test_protected_launch.py \
+            tests/execution/test_protected_bootstrap.py \
+            tests/execution/test_protected_profile.py \
+            tests/execution/test_protected_runtime.py
+        env:
+          DYNAMISBENCH_REQUIRE_MUJOCO: "1"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: res555-gate-b2-${{ matrix.name }}
+          path: python/evidence/res555-gate-b2/
+          if-no-files-found: error
+          retention-days: 90
       - name: Generate the M1 qualification report
         run: >
           uv run python tools/m1_qualification.py
@@ -250,6 +351,99 @@ jobs:
           path: python/evidence/mujoco-qualification-${{ matrix.name }}.json
           if-no-files-found: error
           retention-days: 90
+      - name: Release the RES-555 Linux containment boundary
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set +e
+          sudo umount /mnt/res555-scratch
+          sudo rmdir /sys/fs/cgroup/dynamisbench/supervisor
+          sudo rmdir /sys/fs/cgroup/dynamisbench
+
+  # RES-555 protected supervisor integration. Its own job because it provisions the
+  # adopted Linux mechanism (delegated cgroup v2 + a dedicated scratch tmpfs), because
+  # it executes a real supervised worker, and because it must not be lost to the
+  # general python job's timeout. It is not one of the eight ADR-025 gates.
+  res555-protected-supervisor:
+    name: res555-protected-supervisor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --frozen
+      - name: Provision the isolated MuJoCo worker environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --frozen --project worker-mujoco
+          worker_python="$GITHUB_WORKSPACE/python/worker-mujoco/.venv/bin/python"
+          "$worker_python" -I -m dynamisbench.adapters.mujoco --identity \
+            > "$RUNNER_TEMP/mujoco-identity.json"
+          echo "DYNAMISBENCH_MUJOCO_PYTHON=$worker_python" >> "$GITHUB_ENV"
+          echo "DYNAMISBENCH_REQUIRE_MUJOCO=1" >> "$GITHUB_ENV"
+      - name: Provision the RES-555 Linux containment boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/sys/fs/cgroup/dynamisbench
+          sudo mkdir -p "$root/supervisor"
+          for controller in pids memory cpu; do
+            if ! grep -qw "$controller" /sys/fs/cgroup/cgroup.subtree_control; then
+              echo "+$controller" | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null
+            fi
+          done
+          for controller in pids memory cpu; do
+            if ! grep -qw "$controller" "$root/cgroup.subtree_control"; then
+              echo "+$controller" | sudo tee "$root/cgroup.subtree_control" >/dev/null
+            fi
+          done
+          grep -qw pids /sys/fs/cgroup/cgroup.subtree_control
+          grep -qw pids "$root/cgroup.subtree_control"
+          sudo chown -R "$(id -u):$(id -g)" "$root"
+          sudo umount /mnt/res555-scratch 2>/dev/null || true
+          sudo mkdir -p /mnt/res555-scratch
+          sudo mount -t tmpfs -o size=64m,nr_inodes=4096,nodev,nosuid,noexec tmpfs /mnt/res555-scratch
+          sudo chown "$(id -u):$(id -g)" /mnt/res555-scratch
+          echo "DYNAMISBENCH_CGROUP_ROOT=$root" >> "$GITHUB_ENV"
+          echo "DYNAMISBENCH_PROTECTED_SCRATCH_ROOT=/mnt/res555-scratch" >> "$GITHUB_ENV"
+      - name: Run the protected pinned-reference supervisor execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Bounded, and instrumented: a test that runs longer than 150 s dumps every
+          # thread's stack into the log, so a hang names its own cause instead of only
+          # failing the step.
+          timeout 1500 bash tools/res555_gate_b2/exec_in_cgroup.sh \
+            uv run --frozen pytest -q -x -o faulthandler_timeout=150 \
+            tests/execution/mujoco/test_protected_supervisor_execution.py
+        env:
+          DYNAMISBENCH_REQUIRE_MUJOCO: "1"
+          DYNAMISBENCH_REQUIRE_PROTECTED_ROUTE: "1"
+          DYNAMISBENCH_PROTECTED_ROUTE: "1"
+          DYNAMISBENCH_PROTECTED_EVIDENCE_DIR: evidence/res555-protected-supervisor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: res555-protected-supervisor-linux-x64
+          path: python/evidence/res555-protected-supervisor/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Release the RES-555 Linux containment boundary
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          sudo umount /mnt/res555-scratch
+          sudo rmdir /sys/fs/cgroup/dynamisbench/supervisor
+          sudo rmdir /sys/fs/cgroup/dynamisbench
 
   # This job is deliberately NOT one of the eight required ADR-025 qualification gates.
   # Those remain platform-identity, python, frontend and desktop on both pinned images. This
@@ -290,6 +484,47 @@ jobs:
         with:
           name: mujoco-receipt-comparison
           path: python/evidence/mujoco-receipt-comparison.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # Additional RES-555 Gate B2 acceptance evidence, deliberately outside the eight ADR-025
+  # gates. It compares the two probe observations at the exact tested commits and requires
+  # the same materialized model identity and the same qualified trajectory.
+  res555-gate-b2-comparison:
+    name: res555-gate-b2-comparison
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: python
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --frozen
+      - uses: actions/download-artifact@v4
+        with:
+          name: res555-gate-b2-windows-x64
+          path: python/evidence/b2/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: res555-gate-b2-linux-x64
+          path: python/evidence/b2/linux
+      - name: Compare the Windows and Linux Gate B2 probe observations
+        run: >
+          uv run --frozen python -m tools.res555_gate_b2.compare
+          --windows evidence/b2/windows/windows-x86-64.json
+          --linux evidence/b2/linux/linux-x86-64.json
+          --output evidence/res555-gate-b2-comparison.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: res555-gate-b2-comparison
+          path: python/evidence/res555-gate-b2-comparison.json
           if-no-files-found: error
           retention-days: 90
 

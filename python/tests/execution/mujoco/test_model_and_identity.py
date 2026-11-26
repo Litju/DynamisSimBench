@@ -215,3 +215,18 @@ def test_the_engine_version_is_a_semver_and_the_adapter_scope_is_narrow(
             Capability.TRAJECTORY_OPTIMIZATION.value,
         }
     )
+
+
+def test_the_materialized_compiler_matches_the_packaged_physics_path() -> None:
+    """The Gate B2 compiler must be the same reviewed model, not a second physics path."""
+    import tempfile
+
+    from tests.execution.mujoco.support import run_materialized_parity
+
+    with tempfile.TemporaryDirectory(prefix="dynamisbench-parity-") as scratch:
+        observation = run_materialized_parity(Path(scratch))
+    assert observation["schema"] == "dynamisbench.mujoco.materialized-parity/1"
+    assert observation["diagnostics_equal"] is True
+    assert observation["samples_equal"] is True
+    assert observation["trajectory_sha256"] == observation["packaged_trajectory_sha256"]
+    assert len(observation["implementation_digest"]) == 64

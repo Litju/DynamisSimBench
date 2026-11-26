@@ -1,0 +1,294 @@
+{
+  "checks": [
+    {
+      "expected": "demonstrated",
+      "name": "windows_verdict",
+      "observed": "demonstrated",
+      "passed": true
+    },
+    {
+      "expected": "demonstrated",
+      "name": "linux_verdict",
+      "observed": "demonstrated",
+      "passed": true
+    },
+    {
+      "expected": true,
+      "name": "windows_receipt_completed",
+      "observed": true,
+      "passed": true
+    },
+    {
+      "expected": true,
+      "name": "linux_receipt_completed",
+      "observed": true,
+      "passed": true
+    },
+    {
+      "expected": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+      "name": "same_model",
+      "observed": [
+        "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+        "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd"
+      ],
+      "passed": true
+    },
+    {
+      "expected": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+      "name": "model_pinned",
+      "observed": [
+        "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+        "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd"
+      ],
+      "passed": true
+    },
+    {
+      "expected": "input_view with no packaged model",
+      "name": "model_from_input_view",
+      "observed": [
+        "input_view",
+        "input_view"
+      ],
+      "passed": true
+    },
+    {
+      "expected": "one equal SHA-256",
+      "name": "same_trajectory",
+      "observed": [
+        "f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf",
+        "f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf"
+      ],
+      "passed": true
+    },
+    {
+      "expected": "the supervisor's comparison with the committed qualified reference",
+      "name": "windows_qualified_trajectory",
+      "observed": {
+        "expected_trajectory_sha256": "f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf",
+        "matches": true,
+        "observed_trajectory_sha256": "f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf"
+      },
+      "passed": true
+    },
+    {
+      "expected": "the supervisor's comparison with the committed qualified reference",
+      "name": "linux_qualified_trajectory",
+      "observed": {
+        "expected_trajectory_sha256": "f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf",
+        "matches": true,
+        "observed_trajectory_sha256": "f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf"
+      },
+      "passed": true
+    },
+    {
+      "expected": 2000,
+      "name": "steps",
+      "observed": [
+        2000,
+        2000
+      ],
+      "passed": true
+    },
+    {
+      "expected": true,
+      "name": "runtime_matches",
+      "observed": [
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": [
+        "windows-appcontainer",
+        true
+      ],
+      "name": "windows_appcontainer",
+      "observed": [
+        "windows-appcontainer",
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": "an AppContainer token with zero package capabilities",
+      "name": "windows_token_no_capabilities",
+      "observed": {
+        "appcontainer_sid": "S-1-15-2-3418935669-1158944820-240772761-1749098167-148334213-3063631104-3595862578",
+        "capabilities": [],
+        "capability_count": 0,
+        "elevated": true,
+        "elevation_type": 1,
+        "expected_sid": "S-1-15-2-3418935669-1158944820-240772761-1749098167-148334213-3063631104-3595862578",
+        "has_restrictions": false,
+        "integrity_level": "S-1-16-4096",
+        "is_appcontainer": true,
+        "privilege_count": 2,
+        "privileges": [
+          {
+            "enabled": true,
+            "name": "SeChangeNotifyPrivilege"
+          },
+          {
+            "enabled": false,
+            "name": "SeIncreaseWorkingSetPrivilege"
+          }
+        ],
+        "restricted_token": false,
+        "sid_matches": true
+      },
+      "passed": true
+    },
+    {
+      "expected": [
+        "linux-landlock",
+        true
+      ],
+      "name": "linux_landlock",
+      "observed": [
+        "linux-landlock",
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": [
+        "linux-landlock-tcp+seccomp",
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "name": "linux_seccomp",
+      "observed": [
+        "linux-landlock-tcp+seccomp",
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": [
+        "linux-cgroup-v2-pids",
+        "tasks-and-threads",
+        true,
+        true,
+        true
+      ],
+      "name": "linux_cgroup",
+      "observed": [
+        "linux-cgroup-v2-pids",
+        "tasks-and-threads",
+        true,
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": "a dedicated filesystem or a sampled watchdog, never post-exit only",
+      "name": "windows_scratch_bounded",
+      "observed": [
+        "sampled-watchdog",
+        256,
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": "the host-provisioned dedicated 64 MiB filesystem used by the qualified run",
+      "name": "linux_scratch_dedicated",
+      "observed": [
+        "dedicated-filesystem",
+        256,
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": [
+        true,
+        true
+      ],
+      "name": "input_view_stable",
+      "observed": [
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": [
+        true,
+        true
+      ],
+      "name": "headless_gl",
+      "observed": [
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": [
+        true,
+        true
+      ],
+      "name": "network_canary_control",
+      "observed": [
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": [
+        true,
+        true
+      ],
+      "name": "network_denied",
+      "observed": [
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": [
+        true,
+        true
+      ],
+      "name": "environment_sanitized",
+      "observed": [
+        true,
+        true
+      ],
+      "passed": true
+    },
+    {
+      "expected": "two distinct platform execution fingerprints",
+      "name": "distinct_platform_fingerprints",
+      "observed": [
+        "71bbe82ec764bd6dc3496835d1e1c3d154a16d32cb2379a350b9b3c5df9d58a7",
+        "02c58428374d82ecacb2f4b84ac6cf19442bf50e8174a5f42addf54d3e4fdfb1"
+      ],
+      "passed": true
+    }
+  ],
+  "failed_checks": [],
+  "kind": "res555-gate-b2-cross-platform-probe-comparison",
+  "linux": "evidence/b2/linux/linux-x86-64.json",
+  "linux_mechanism": "linux-landlock",
+  "model_sha256": "eac679a723ccfebb48ea5ee40692fa6ee38f965772b484b94b827be6b9dbfdfd",
+  "schema": "dynamisbench.res555.gate-b2-comparison/1",
+  "trajectory_sha256": "f585292dae08650de7980e5ff00256e1ca9a80bd28474f9357df9f6daf3278bf",
+  "verdict": "pass",
+  "windows": "evidence/b2/windows/windows-x86-64.json",
+  "windows_mechanism": "windows-appcontainer"
+}
