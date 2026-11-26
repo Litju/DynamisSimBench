@@ -1,9 +1,27 @@
 # RES-555 — protected-main stack reconciliation
 
-Status: **PLAN ONLY. NO BRANCH WAS UPDATED, NO PR WAS MERGED, NO ATOMIC COMMIT WAS REWRITTEN.**
-This document records the exact retargeting, qualification and merge requirements for the
-four existing PRs against the current protected main. It is a review artifact, not authority
-to merge.
+Status: **RECONCILED HEADS PREPARED. QUALIFICATION PENDING. NO PR MERGED, NO ATOMIC COMMIT
+REWRITTEN.** This document records the exact retargeting, qualification and merge
+requirements for the four existing PRs against the current protected main. It is a review
+artifact, not authority to merge.
+
+## 2026-11-26 reconciliation update
+
+Current protected main is unchanged at `16adf8a`. Each layer was updated in dependency
+order with `git merge --no-ff`, preserving every atomic commit:
+
+| PR | Branch | Reconciled head | What the merge commit carries |
+|---|---|---|---|
+| #31 | `res-555-exact-input-admission` | `fdb4305` | current main `16adf8a` |
+| #32 | `res-555-offline-input-verification` | `fbc69f7` | the updated #31 head `fdb4305` |
+| #34 | `res-555-a1-filesystem-checkpoints` | `01a3b42` | the updated #32 head `fbc69f7` |
+| #35 | `res-555-b2-protected-worker` | `03c6238` | the updated #34 head `01a3b42`, on top of the CI repair `6d389b9` and the adapter request `a00b3e0` |
+
+No branch was rebased, squashed or force-pushed. No layer was merged to `main`. The
+exact-head `quality` run on each reconciled head is the qualification; earlier runs are
+historical. Merge remains blocked on the owner's explicit authorization and, for #35, the
+named human review.
+
 
 ## Current protected-main ruleset
 
@@ -25,14 +43,14 @@ for the B2 layer, but they do not replace the eight.
 
 Current main: `16adf8a7173339b7be47dffe280915e826329e3e` (`16adf8a`, RES-742 Gate 3).
 
-## Current PR state
+## Historical PR state before the 2026-11-26 reconciliation
 
-| PR | Branch | Head | Base | Position | Last exact-head result |
-|---|---|---|---|---|---|
-| #31 | `res-555-exact-input-admission` | `bfd5e6a805deaad6648666ebca4ec5b8abb8d3b1` | `main` | 2 commits ahead, **36 behind main** | [44298784653](https://github.com/Litju/DynamisSimBench/actions/runs/44298784653) success on the old base |
-| #32 | `res-555-offline-input-verification` | `e7058418e3dbb72038accb8e04996c4d8e4ed1f1` | `res-555-exact-input-admission` | stacked on #31 | [44339225463](https://github.com/Litju/DynamisSimBench/actions/runs/44339225463) success |
-| #34 | `res-555-a1-filesystem-checkpoints` | `5860904f37226d2d2749573a5f52c0c89c68c692` | `res-555-offline-input-verification` | stacked on #32 | [45169206418](https://github.com/Litju/DynamisSimBench/actions/runs/45169206418) **failure** (Windows `python`); integration `d310f7f` [45170458764](https://github.com/Litju/DynamisSimBench/actions/runs/45170458764) success |
-| #35 | `res-555-b2-protected-worker` | `7d436c8e8a7ea51826668520054a9bfcede9fe2b` | `res-555-a1-filesystem-checkpoints` | stacked on #34 | code `b2c2309` [45684551797](https://github.com/Litju/DynamisSimBench/actions/runs/45684551797) success (10/10); final evidence head has no exact-head run |
+| PR | Branch | Historical head | Base | Last historical exact-head result |
+|---|---|---|---|---|
+| #31 | `res-555-exact-input-admission` | `bfd5e6a805deaad6648666ebca4ec5b8abb8d3b1` | `main` | [44298784653](https://github.com/Litju/DynamisSimBench/actions/runs/44298784653) success on the old base |
+| #32 | `res-555-offline-input-verification` | `e7058418e3dbb72038accb8e04996c4d8e4ed1f1` | `res-555-exact-input-admission` | [44339225463](https://github.com/Litju/DynamisSimBench/actions/runs/44339225463) success |
+| #34 | `res-555-a1-filesystem-checkpoints` | `5860904f37226d2d2749573a5f52c0c89c68c692` | `res-555-offline-input-verification` | [45169206418](https://github.com/Litju/DynamisSimBench/actions/runs/45169206418) **failure** (Windows `python`); integration `d310f7f` [45170458764](https://github.com/Litju/DynamisSimBench/actions/runs/45170458764) success |
+| #35 | `res-555-b2-protected-worker` | `7d436c8e8a7ea51826668520054a9bfcede9fe2b` | `res-555-a1-filesystem-checkpoints` | code `b2c2309` [45684551797](https://github.com/Litju/DynamisSimBench/actions/runs/45684551797) success (10/10); final evidence head has no exact-head run |
 
 Current B2 branch after the owner decision and correction commits:
 `e9d01fb` (production-runtime increment), on top of `9a02e9e` (correction increment) and the
