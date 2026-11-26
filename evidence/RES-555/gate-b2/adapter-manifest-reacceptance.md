@@ -1,10 +1,8 @@
 # RES-555 — expanded adapter-manifest re-acceptance request
 
-Status: **REQUESTED. NOT ACCEPTED. PRODUCTION NOT ACTIVATED.**
+Status: **OWNER CONDITIONALLY ACCEPTED (2026-11-26), PINNED REFERENCE ONLY. IDENTITY IMPLEMENTATION AND HUMAN REVIEW PENDING. PRODUCTION NOT ACTIVATED.**
 This record prepares the exact replacement adapter implementation identity required by owner
-condition §3.8. The protected route still pins the owner-accepted 10-file identity from
-2026-11-25 and has not been changed. The agent prepared the request; only the owner can accept
-the new digests.
+condition §3.8. The protected route still pins the earlier 10-file identity from 2026-11-25 until a distinct implementation commit switches to schema 2 and requalifies the exact implementation. The owner conditionally accepted both proposed schema-2 digests on 2026-11-26, recorded in [Linear RES-555](https://linear.app/alignerr-cmj/issue/RES-555/db-33-content-addressed-modeldefinition-materialization-worker-input) (owner decision comment `a6712040-c29a-47c1-9cb3-d885b763743b`). The owner selected the decision; the agent only recorded it.
 
 ## 1. Why this is a new decision
 
@@ -77,7 +75,7 @@ reconstruct the digest.
 
 ## 3. What acceptance would and would not authorize
 
-If the owner accepts both candidate digests, a separate commit would:
+Under the owner's conditional acceptance, a separate reviewed implementation commit **must**:
 
 1. replace `ADAPTER_SOURCE_FILES`-only identity construction with the schema-2 payload;
 2. add `production_entry_manifest` to `reconstruct_implementation_digest` and compare it in
@@ -93,13 +91,11 @@ output, canonicalization, assessment or seal is added. ADR-027 remains separate.
 
 | Field | Owner entry |
 |---|---|
-| Accept the schema-2 identity and both candidate digests? | **PENDING** |
-| Accepted Windows digest | **PENDING** |
-| Accepted Linux digest | **PENDING** |
-| Owner name / role | **PENDING** |
-| Date | **PENDING** |
-| Conditions (if any) | **PENDING** |
+| Accept the schema-2 identity and both candidate digests? | **YES, CONDITIONALLY; pinned-reference profile only** |
+| Accepted Windows digest | `86d5e912fa876208e156bfe13f91be6a5cfde7f0aefcc9e0bbf3aedbc7051f20` |
+| Accepted Linux digest | `9ea31547f2246e2a8eedcaefcac8ae767086711c96ad79d5da835f72e5bc2ea1` |
+| Owner name / role | **Litju — repository owner; owner-directed acceptance recorded in Linear** |
+| Date | **2026-11-26** |
+| Conditions (if any) | **Exact-file identity implementation and Windows/Linux requalification; unchanged pinned MuJoCo reference; no production/UI activation or PR #35 merge until named independent human security/runtime/scientific review and all D3/D4 activation gates; no ADR-027/native output, canonicalization, assessment or seal** |
 
-The owner's explicit entry is the acceptance. This record, the automated review and the
-implementation tests are not a substitute for the named human security/runtime/scientific
-review.
+The owner conditionally accepted the **candidate identity values**, not yet the code to enforce them. The machine-readable candidate file retains `status: requested-not-accepted` until the reviewed source-identity migration and its test expectations are updated together. Human security/runtime/scientific sign-off remains outstanding; this record and CI are not that review.
