@@ -1,6 +1,14 @@
 # RES-555 — smallest production increment: protected pinned-reference execution
 
-Status: **DESIGN ONLY. NOT AUTHORIZED. NO PRODUCTION ROUTE IS ACTIVATED.** This document
+Status: **DESIGN ONLY. NOT AUTHORIZED. NO PRODUCTION ROUTE IS ACTIVATED.**
+
+> **Implementation status (2026-11-25).** The route described below is implemented and runs
+> end to end through `execute_preflighted` on a non-elevated Windows principal. See
+> `protected-supervisor-integration.md` for the observed execution, commit SHAs and the
+> remaining activation blockers. This document is retained as the design the implementation
+> followed; it is not the acceptance record and not an activation.
+
+This document
 identifies the smallest next increment that could connect the B2 bootstrap to
 `execute_preflighted`. It does not edit an accepted ADR, does not add a production gate, and
 does not authorize native output, canonicalization, assessment or sealing.

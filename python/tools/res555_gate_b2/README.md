@@ -6,6 +6,14 @@ Linux hosts, whether the mechanisms proposed in
 `evidence/RES-555/gate-b2/authority-decision.md` can be established and whether the real
 pinned MuJoCo worker can consume the exact verified materialized model bytes under them.
 
+The host mechanisms it exercises (Windows AppContainer + Job Object, Linux Landlock +
+seccomp + cgroup v2) moved to `dynamisbench.host.protected_windows` and
+`dynamisbench.host.protected_cgroup`; `tools/res555_gate_b2/windows.py` and
+`tools/res555_gate_b2/linux_cgroup.py` are thin re-exports, so these observations exercise
+the same code the protected launcher uses. The probe itself remains the unadmitted harness.
+The production-integrated route is `dynamisbench.execution.protected_launch`, recorded in
+`evidence/RES-555/gate-b2/protected-supervisor-integration.md`; it is not activated.
+
 The authority packet is a **proposal**, not an accepted decision. ADR-027 remains proposed.
 Native extraction, sealing and a production materialized-worker route remain unavailable.
 
