@@ -302,6 +302,38 @@ jobs:
         env:
           DYNAMISBENCH_RES555_B2_PROBE: "1"
           DYNAMISBENCH_RES555_B2_EVIDENCE_DIR: "evidence/res555-gate-b2"
+      # RES-555 protected supervisor integration. The Linux job has the adopted
+      # mechanism (Landlock, seccomp, a delegated cgroup v2 subtree and a dedicated
+      # scratch tmpfs), so it must execute the pinned reference through
+      # `execute_preflighted` and fail closed if the route is unavailable. The hosted
+      # Windows runner is elevated and the adopted Windows production principal is
+      # non-elevated, so the Windows job asserts the refusal and the launch contracts
+      # instead of claiming an unqualified execution.
+      - name: Run the RES-555 protected supervisor execution (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/res555_gate_b2/exec_in_cgroup.sh uv run --frozen pytest -q \
+            tests/execution/mujoco/test_protected_supervisor_execution.py
+        env:
+          DYNAMISBENCH_REQUIRE_MUJOCO: "1"
+          DYNAMISBENCH_REQUIRE_PROTECTED_ROUTE: "1"
+          DYNAMISBENCH_PROTECTED_SCRATCH_ROOT: /mnt/res555-scratch
+      - name: Run the RES-555 protected launch contracts (Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --frozen pytest -q \
+            tests/host/test_protected_windows.py \
+            tests/execution/test_protected_launch.py \
+            tests/execution/test_protected_bootstrap.py \
+            tests/execution/test_protected_profile.py \
+            tests/execution/test_protected_runtime.py \
+            tests/execution/mujoco/test_protected_supervisor_execution.py
+        env:
+          DYNAMISBENCH_REQUIRE_MUJOCO: "1"
       - uses: actions/upload-artifact@v4
         with:
           name: res555-gate-b2-${{ matrix.name }}

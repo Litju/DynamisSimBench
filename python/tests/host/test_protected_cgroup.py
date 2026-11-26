@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from tools.res555_gate_b2 import linux_cgroup
 
 from dynamisbench.host import protected_cgroup
-from tools.res555_gate_b2 import linux_cgroup
 
 
 def test_the_probe_shim_is_the_production_mechanism() -> None:

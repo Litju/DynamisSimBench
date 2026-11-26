@@ -64,18 +64,20 @@ def test_an_elevated_residual_can_only_be_accepted_explicitly(
 
 
 @windows_only
-def test_a_non_elevated_supervisor_is_accepted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    limited = {
-        "elevated": False,
-        "elevation_type": 3,
-        "integrity_level": "S-1-16-8192",
-        "capability_count": 0,
-        "privileges": [],
-    }
-    monkeypatch.setattr(protected_windows, "supervisor_principal", lambda: dict(limited))
+def test_the_real_supervisor_principal_is_the_adopted_one() -> None:
+    """On this host, either the non-elevated gate passes or it refuses an elevated token.
 
-    accepted = protected_windows.require_non_elevated_supervisor()
+    The hosted Windows runner is elevated, so its CI assertion is the refusal. The qualified
+    protected execution is on a non-elevated principal, which is the owner's production
+    requirement.
+    """
+    if os.name != "nt":
+        pytest.skip("the AppContainer principal is a Windows observation")
+    principal = protected_windows.supervisor_principal()
 
-    assert accepted["elevated"] is False
+    if principal["elevated"]:
+        with pytest.raises(protected_windows.PrincipalError):
+            protected_windows.require_non_elevated_supervisor()
+    else:
+        accepted = protected_windows.require_non_elevated_supervisor()
+        assert accepted["elevated"] is False

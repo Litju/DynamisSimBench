@@ -100,3 +100,39 @@ def b2_runtime():
                 yield None, runtime
     finally:
         shutil.rmtree(registry, ignore_errors=True)
+
+
+@pytest.fixture(scope="session")
+def protected_route():
+    """One opened production protected route for the whole supervisor session.
+
+    This is the internal activation value: it measures the runtime snapshot the route will
+    execute and opens AppContainer or Landlock + seccomp + cgroup v2. A host that cannot
+    provide the adopted mechanism fails closed; the fixture never falls back to the
+    diagnostic launch.
+    """
+    from dynamisbench.execution.protected_launch import (
+        ProtectedLaunchError,
+        prepare_protected_route,
+    )
+
+    scratch_root = os.environ.get("DYNAMISBENCH_PROTECTED_SCRATCH_ROOT") or os.environ.get(
+        "DYNAMISBENCH_RES555_B2_SCRATCH_ROOT"
+    )
+    try:
+        route = prepare_protected_route(
+            worker_python=worker_python(),
+            scratch_root=Path(scratch_root) if scratch_root else None,
+        )
+    except ProtectedLaunchError as error:
+        # The hosted Windows runner is elevated, so the adopted non-elevated principal is
+        # unavailable there by design. The Linux job sets DYNAMISBENCH_REQUIRE_PROTECTED_ROUTE
+        # and fails instead of skipping.
+        message = f"the protected route is unavailable on this host: {error}"
+        if os.environ.get("DYNAMISBENCH_REQUIRE_PROTECTED_ROUTE") == "1":
+            pytest.fail(message)
+        pytest.skip(message)
+    try:
+        yield route
+    finally:
+        route.close()
