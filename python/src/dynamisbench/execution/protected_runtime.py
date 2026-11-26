@@ -300,9 +300,14 @@ def _run_environment_probe(worker_python: Path) -> RuntimeEnvironment:
 def _system32_tool(name: str) -> str:
     """Resolve a privileged helper from the kernel's system directory, not the environment."""
     import ctypes
+    from typing import Any, cast
 
     buffer = ctypes.create_unicode_buffer(261)
-    length = ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
+    # Ruff's B009 is about `getattr` on a normal object; `ctypes.windll` is defined only on
+    # Windows in typeshed, so the dynamic lookup is what keeps this module type-checkable on
+    # the Linux qualification image.
+    kernel32 = cast(Any, getattr(ctypes, "windll")).kernel32  # noqa: B009
+    length = kernel32.GetSystemDirectoryW(buffer, len(buffer))
     if length == 0 or length >= len(buffer):
         raise ProtectedRuntimeError("the Windows system directory could not be resolved")
     candidate = Path(buffer.value) / name
