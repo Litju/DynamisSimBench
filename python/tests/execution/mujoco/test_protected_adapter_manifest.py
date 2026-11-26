@@ -22,7 +22,10 @@ from dynamisbench.adapters.mujoco.protected_contracts import (
     CANDIDATE_PRODUCTION_ENTRY_FILES,
     expanded_implementation_identity,
 )
-from dynamisbench.execution.protected_launch import ProtectedLaunchError, _verify_production_identity
+from dynamisbench.execution.protected_launch import (
+    ProtectedLaunchError,
+    _verify_production_identity,
+)
 from dynamisbench.execution.protected_profile import (
     ADAPTER_IMPLEMENTATION_DIGESTS,
     PROTECTED_IMPLEMENTATION_DIGESTS,

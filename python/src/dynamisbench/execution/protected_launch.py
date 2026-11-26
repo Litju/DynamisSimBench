@@ -52,10 +52,10 @@ from dynamisbench.adapters.mujoco import reference
 from dynamisbench.adapters.mujoco.protected_contracts import (
     MAX_RECEIPT_BYTES,
     ConsumptionReceipt,
-    expanded_implementation_identity,
     ProbeObservation,
     ProbeTargets,
     RuntimeSummary,
+    expanded_implementation_identity,
     measure_runtime_identity,
     read_bounded_regular,
     sha256_bytes,
