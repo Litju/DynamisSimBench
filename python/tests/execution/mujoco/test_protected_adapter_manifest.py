@@ -125,9 +125,9 @@ def test_the_supervisor_reconstructs_the_accepted_13_file_identity(
     """The owner-approved schema-2 digest is a strict launch check, not metadata."""
     snapshot = _copy_the_exact_bound_source(tmp_path)
     profile = build_protected_profile(platform)
-    assert _verify_production_identity(profile, snapshot) == PROTECTED_IMPLEMENTATION_DIGESTS[
-        platform
-    ]
+    assert (
+        _verify_production_identity(profile, snapshot) == PROTECTED_IMPLEMENTATION_DIGESTS[platform]
+    )
 
 
 @pytest.mark.parametrize(
