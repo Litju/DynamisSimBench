@@ -1638,6 +1638,8 @@ class ProtectedAttempt:
                 self.watchdog.stop()
             except Exception:  # noqa: BLE001
                 pass
+        if self._sampler is not None:
+            self._sampler.stop()
         if self.tree is not None:
             try:
                 self.tree.close()

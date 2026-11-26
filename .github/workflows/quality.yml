@@ -314,24 +314,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash tools/res555_gate_b2/exec_in_cgroup.sh uv run --frozen pytest -q \
+          # Bounded: a hung protected attempt must fail the step, not the job.
+          timeout 1500 bash tools/res555_gate_b2/exec_in_cgroup.sh uv run --frozen pytest -q \
             tests/execution/mujoco/test_protected_supervisor_execution.py
         env:
           DYNAMISBENCH_REQUIRE_MUJOCO: "1"
           DYNAMISBENCH_REQUIRE_PROTECTED_ROUTE: "1"
+          DYNAMISBENCH_PROTECTED_ROUTE: "1"
           DYNAMISBENCH_PROTECTED_SCRATCH_ROOT: /mnt/res555-scratch
       - name: Run the RES-555 protected launch contracts (Windows)
         if: runner.os != 'Linux'
         shell: bash
         run: |
           set -euo pipefail
+          # The hosted Windows runner is elevated, so the supervisor module skips and
+          # the principal test asserts the refusal. The launch contracts still run.
           uv run --frozen pytest -q \
             tests/host/test_protected_windows.py \
             tests/execution/test_protected_launch.py \
             tests/execution/test_protected_bootstrap.py \
             tests/execution/test_protected_profile.py \
-            tests/execution/test_protected_runtime.py \
-            tests/execution/mujoco/test_protected_supervisor_execution.py
+            tests/execution/test_protected_runtime.py
         env:
           DYNAMISBENCH_REQUIRE_MUJOCO: "1"
       - uses: actions/upload-artifact@v4

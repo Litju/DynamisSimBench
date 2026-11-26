@@ -49,6 +49,14 @@ from tests.execution.mujoco.support import (
 
 _PROTECTED_RECORD = PROTECTED_SUPERVISOR_RECORD_NAME
 
+pytestmark = pytest.mark.skipif(
+    os.environ.get("DYNAMISBENCH_PROTECTED_ROUTE") != "1",
+    reason=(
+        "the protected route is an expensive host-provisioned qualification; it runs only "
+        "in the dedicated RES-555 step that sets DYNAMISBENCH_PROTECTED_ROUTE=1"
+    ),
+)
+
 
 def _prepare(
     fixture: ExecutionFixture,
