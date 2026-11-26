@@ -82,7 +82,24 @@ qualified observations exercise the same AppContainer and cgroup code the route 
 | Dependency closure | worker-reported closure equals the closure measured from the worker interpreter (`6a2f7ad6…`) |
 | Scratch | 4 entries / 4 files / 9,038 bytes, 0 links, watchdog 745 samples, not triggered (`sampled-watchdog`) |
 | Persisted record | `protected-consumption.json`, `dynamisbench.protected-consumption/1`, carrying the full untrusted receipt so its digest is recomputable |
-| Retained artifact | `evidence/RES-555/gate-b2/protected-supervisor/windows-x86-64.json` |
+| Retained artifact | `evidence/RES-555/gate-b2/protected-supervisor/windows-x86-64.json`, SHA-256 `1752b6c0f8b29c169b5a39a24334ac4a4658517cdb9bcc9bd5e7f6d07e3947d6` |
+
+Linux, on the dedicated CI job at head `33630f7` (`res555-protected-supervisor`, run
+[45740104463](https://github.com/Litju/DynamisSimBench/actions/runs/45740104463)):
+
+| Fact | Observation |
+|---|---|
+| Principal | same-UID supervisor, `CapEff=0000000000000000`, `NoNewPrivs=0` before the sandbox |
+| Worker process | `NoNewPrivs=1`, `Seccomp=2`, `Seccomp_filters=1`, `CapEff=0000000000000000`, sampled from the worker's own `/proc/<pid>/status` while it ran |
+| Mechanism | Landlock ABI 8, seccomp network policy, delegated cgroup v2 subtree, dedicated 64 MiB scratch tmpfs |
+| Result | `COMPLETED`, 0 refusals, exit 0, stdin delivered, reaped, `process_tree_cleaned=True` |
+| Supervisor checks | **55 / 55 passed** |
+| Inside-worker probes | 18 recorded, **all** observed their expected outcome, including UDP, raw, Unix-domain, socketpair and `io_uring` denials |
+| Adapter identity | `7993ac96…` (the accepted Linux digest) |
+| Runtime | snapshot == post-exit (`a98aa146…`); closure `b18e773f…` matched by the worker; `pyvenv.cfg` `2e6f87b8…` measured and re-verified |
+| Reference | 2,000 steps, trajectory `f585292d…` equal to the committed reference |
+| Scratch | `dedicated-filesystem`, 4 entries / 8,146 bytes, 0 links, 145 watchdog samples |
+| Retained artifact | `evidence/RES-555/gate-b2/protected-supervisor/linux-x86-64.json`, SHA-256 `e85326bfea5c7fe6b3bc6a8a573b038647996dd913cce21601230cb6458c3064` |
 
 Negative and boundary tests that ran on the same tree: protected timeout (`TIMED_OUT`, tree
 cleaned, no success seal), pre-set cancellation (`CANCELED`), resource-bound violation
@@ -144,13 +161,18 @@ Recorded as accepted residuals rather than fixed:
 
 The Linux path is the same launcher with the adopted Landlock ABI >= 4 + seccomp +
 delegated cgroup v2 + dedicated scratch mechanism, the digest-pinned sandbox modules, the
-measured `pyvenv.cfg` in the read allowlist, and the worker-pid isolation sampler. It cannot
-be qualified on this host. The CI job runs
-`tests/execution/mujoco/test_protected_supervisor_execution.py` inside the delegated cgroup
-with `DYNAMISBENCH_REQUIRE_PROTECTED_ROUTE=1`, so an unavailable mechanism fails the job
-instead of skipping. The hosted Windows runner is elevated, so its job asserts the
-non-elevated gate refuses rather than claiming an unqualified execution; the qualified
-Windows observation above is from a non-elevated local principal.
+measured `pyvenv.cfg` in the read allowlist, and the worker-pid isolation sampler. It is
+**qualified on the dedicated CI job at head `33630f7`**: Landlock ABI 8, `Seccomp=2`,
+`NoNewPrivs=1`, zero effective capabilities in the worker, a delegated cgroup subtree, a
+dedicated 64 MiB scratch filesystem, 55/55 supervisor checks, all 18 probes at their
+expected outcome, and the committed trajectory. The retained record is
+`protected-supervisor/linux-x86-64.json`.
+
+The hosted Windows runner is elevated, so its job asserts that the non-elevated gate refuses
+and runs the launch contracts; the qualified Windows execution above is from a non-elevated
+local principal. The general Linux suite skips the protected module unless
+`DYNAMISBENCH_PROTECTED_ROUTE=1`; the dedicated job sets it and fails rather than skips when
+the mechanism is unavailable.
 
 ## 6. Remaining activation blockers, mapped to the owner record §3
 
