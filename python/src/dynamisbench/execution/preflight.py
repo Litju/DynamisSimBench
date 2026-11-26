@@ -147,6 +147,7 @@ class PreparedExecutionInputs:
     report: PreflightReport
     worker_environment_digest: SemanticDigest
     inputs: MaterializedInputs
+    request: WorkerRequest | None = None
 
 
 def required_capabilities_of(planned_run: PlannedRun) -> tuple[Capability, ...]:
@@ -679,7 +680,9 @@ def prepare_execution_inputs(
         system_under_test=system_under_test,
         environment=environment,
     )
-    return PreparedExecutionInputs(candidate.report, candidate.manifest_digest, inputs)
+    return PreparedExecutionInputs(
+        candidate.report, candidate.manifest_digest, inputs, candidate.request
+    )
 
 
 def _preflight_run(
