@@ -74,6 +74,7 @@ class _View:
         self.root = self.reader.open_root(root)
         handles.callback(self.reader.close, self.root)
         self.directories: dict[int, dict[str, int]] = {}
+        self.opened: dict[tuple[int, str], bool] = {}
 
     def _scan(self, directory: int, names: set[str]) -> dict[str, int]:
         found: dict[str, int] = {}
@@ -98,6 +99,7 @@ class _View:
         inode = self.directories[parent][name]
         handle = self.reader.open_child(parent, name, directory=directory, inode=inode)
         self.handles.callback(self.reader.close, handle)
+        self.opened[parent, name] = directory
         return handle
 
     def read(self, parent: int, name: str, limit: int) -> bytes:
@@ -110,6 +112,13 @@ class _View:
                     MaterializationRefusalCode.INPUT_SOURCE_CHANGED,
                     "the input view entry identities changed during verification",
                 )
+        # A matching directory entry can hide a new hardlink or same-inode
+        # mount. Reapply the handle checks while the original objects are pinned.
+        for (parent, name), directory in self.opened.items():
+            handle = self.reader.open_child(
+                parent, name, directory=directory, inode=self.directories[parent][name]
+            )
+            self.reader.close(handle)
 
 
 def _verify_object(

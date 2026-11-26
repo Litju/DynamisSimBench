@@ -121,6 +121,7 @@ _disk_type = _api(_kernel, "GetFileType", _DWORD, _HANDLE)
 _get_info = _api(
     _kernel, "GetFileInformationByHandle", ctypes.c_int, _HANDLE, ctypes.POINTER(_FileInfo)
 )
+_final_path = _api(_kernel, "GetFinalPathNameByHandleW", _DWORD, _HANDLE, _HANDLE, _DWORD, _DWORD)
 _query = _api(
     _kernel, "GetFileInformationByHandleEx", ctypes.c_int, _HANDLE, ctypes.c_int, _HANDLE, _DWORD
 )
@@ -228,7 +229,17 @@ def open_root(path: Path) -> int:
             _require_plain(info, directory=True)
             if info.volume != volume:
                 raise OSError("input view root crossed a volume")
-        _check_streams(handle, directory=True)
+        # NtCreateFile can resolve case and 8.3 aliases even for relative opens.
+        # Compare the full normalized name of the held root, without reopening it.
+        normalized = ctypes.create_unicode_buffer(32768)
+        size = _final_path(handle, normalized, len(normalized), 0)
+        if not 0 < size < len(normalized):
+            raise OSError("the normalized input view root name is unavailable")
+        if normalized.value != f"\\\\?\\{path.drive.upper()}{str(path)[2:]}":
+            raise MaterializationError(
+                MaterializationRefusalCode.INPUT_PATH_REFUSED,
+                "the input view root requires its exact NTFS path",
+            )
         return handle
     except BaseException:
         close(handle)
@@ -273,6 +284,7 @@ def open_child(parent: int, name: str, *, directory: bool, inode: int) -> int:
 
 
 def entries(directory: int) -> Iterator[tuple[str, int]]:
+    _check_streams(directory, directory=True)
     buffer = ctypes.create_string_buffer(4096)
     kind = _FILE_ID_BOTH_DIRECTORY_RESTART_INFO
     while _query(directory, kind, buffer, ctypes.sizeof(buffer)):

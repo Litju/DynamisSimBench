@@ -311,6 +311,35 @@ def test_offline_view_survives_relocation_and_source_cache_deletion(
     _assert_no_run(model_fixture)
 
 
+@pytest.mark.parametrize("alias", ["case", "ancestor-case", "short"])
+def test_offline_view_refuses_ntfs_root_alias(
+    candidate_view: tuple[Path, PreparedExecutionInputs, WorkerInputBinding],
+    alias: str,
+) -> None:
+    if sys.platform != "win32":
+        pytest.skip("NTFS root alias fixture")
+    root, prepared, binding = candidate_view
+    assert prepared.request is not None
+    verify_worker_input_view(root, expected=binding, request=prepared.request)
+    if alias == "case":
+        alternate = root.with_name(root.name.swapcase())
+    elif alias == "ancestor-case":
+        alternate = root.parent.with_name(root.parent.name.swapcase()) / root.name
+    else:
+        import ctypes
+
+        short_path = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = short_path(str(root), buffer, len(buffer))
+        assert 0 < length < len(buffer)
+        alternate = Path(buffer.value)
+        if str(alternate).casefold() == str(root).casefold():
+            pytest.skip("NTFS did not create a short alias")
+    assert alternate.samefile(root)
+    with pytest.raises(MaterializationError, match="exact NTFS path"):
+        verify_worker_input_view(alternate, expected=binding, request=prepared.request)
+
+
 @pytest.mark.parametrize(
     ("relative", "mutation"),
     [
@@ -429,6 +458,57 @@ def test_offline_view_refuses_same_bytes_swapped_after_enumeration(
     with pytest.raises(MaterializationError, match="changed identity"):
         verify_worker_input_view(root, expected=binding, request=prepared.request)
     assert replaced
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux permits links to open input files")
+def test_offline_view_refuses_new_hardlink_at_final_checkpoint(
+    candidate_view: tuple[Path, PreparedExecutionInputs, WorkerInputBinding],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, prepared, binding = candidate_view
+    assert prepared.request is not None
+    model = root / "assets" / MODEL_PATH
+    alias = root.parent / "unexpected-hardlink"
+    reader = _platform_reader()
+    read_original = reader.read
+
+    def link_after_model_read(handle: int, limit: int) -> bytes:
+        data = read_original(handle, limit)
+        if data == MODEL_BYTES:
+            alias.hardlink_to(model)
+            assert model.stat().st_nlink == 2
+        return data
+
+    # The extra link is outside the view, so the directory entries and inode
+    # numbers visible inside the view still match at the final checkpoint.
+    monkeypatch.setattr(reader, "read", link_after_model_read)
+    with pytest.raises(MaterializationError, match="link or non-regular object"):
+        verify_worker_input_view(root, expected=binding, request=prepared.request)
+    assert alias.samefile(model)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS root stream fixture")
+def test_offline_view_refuses_new_root_stream_at_final_checkpoint(
+    candidate_view: tuple[Path, PreparedExecutionInputs, WorkerInputBinding],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, prepared, binding = candidate_view
+    assert prepared.request is not None
+    stream = Path(f"{root}:late")
+    reader = _platform_reader()
+    read_original = reader.read
+
+    def add_stream_after_model_read(handle: int, limit: int) -> bytes:
+        data = read_original(handle, limit)
+        if data == MODEL_BYTES:
+            stream.write_bytes(b"unexpected")
+            assert stream.read_bytes() == b"unexpected"
+        return data
+
+    monkeypatch.setattr(reader, "read", add_stream_after_model_read)
+    with pytest.raises(MaterializationError, match="alternate data stream"):
+        verify_worker_input_view(root, expected=binding, request=prepared.request)
+    assert stream.read_bytes() == b"unexpected"
 
 
 def test_offline_view_refuses_manifest_rehashed_with_substitute_asset(
