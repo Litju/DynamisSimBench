@@ -34,10 +34,13 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError as PydanticValidationError
 
+from dynamisbench.domain.spec.benchmark import BenchmarkRelease
 from dynamisbench.domain.spec.capability import Capability
 from dynamisbench.domain.spec.environment import ComponentKind, EnvironmentDefinition
 from dynamisbench.domain.spec.identifiers import VersionSpecifier
 from dynamisbench.domain.spec.realizations import RealizationDefinition
+from dynamisbench.domain.spec.scenarios import ScenarioDefinition
+from dynamisbench.domain.spec.sut import SUTDefinition
 from dynamisbench.evidence.bundle import RunId, parse_run_id
 from dynamisbench.execution.contracts import (
     ExecutionError,
@@ -68,6 +71,7 @@ from dynamisbench.identity import (
     asset_sha256_of_file,
     semantic_sha256,
 )
+from dynamisbench.materialization import MaterializedInputs, materialize_inputs
 from dynamisbench.planning.plan import PlannedRun
 from dynamisbench.planning.runspec import RunSpec, run_spec_fingerprint
 from dynamisbench.workspace.authority import PathScopeError, PersistenceClass
@@ -77,8 +81,10 @@ from dynamisbench.workspace.workspace import Workspace
 __all__ = [
     "PreflightRefusedError",
     "PreflightedRun",
+    "PreparedExecutionInputs",
     "admission_refusals",
     "preflight_run",
+    "prepare_execution_inputs",
     "required_capabilities_of",
 ]
 
@@ -126,6 +132,21 @@ class PreflightedRun:
         starts a process, because a mutable object can outlive the decision it carries.
         """
         return self.report.decision is PreflightDecision.READY and self.request is not None
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedExecutionInputs:
+    """Supervisor-side input preparation for one run and selected environment.
+
+    The report records worker compatibility and the candidate request digest.
+    The input manifest identifies the exact definitions and asset bytes in CACHE.
+    This value is an input integrity checkpoint. Worker consumption requires a
+    separately authorized launch boundary.
+    """
+
+    report: PreflightReport
+    worker_environment_digest: SemanticDigest
+    inputs: MaterializedInputs
 
 
 def required_capabilities_of(planned_run: PlannedRun) -> tuple[Capability, ...]:
@@ -608,6 +629,69 @@ def preflight_run(
 
     :raises BundleNamingError: if ``run_id`` is not a run id.
     """
+    return _preflight_run(
+        run_id,
+        planned_run,
+        realization=realization,
+        environment=environment,
+        manifest=manifest,
+        workspace=workspace,
+        check_source_assets=True,
+    )
+
+
+def prepare_execution_inputs(
+    run_id: RunId,
+    planned_run: PlannedRun,
+    *,
+    benchmark: BenchmarkRelease,
+    scenario: ScenarioDefinition,
+    realization: RealizationDefinition,
+    system_under_test: SUTDefinition,
+    environment: EnvironmentDefinition,
+    manifest: WorkerEnvironmentManifest,
+    workspace: Workspace,
+) -> PreparedExecutionInputs:
+    """Check worker compatibility and prepare the exact RunSpec inputs in CACHE.
+
+    DB-3.3A validates and hashes the source bytes as it copies them, with its
+    existing resource limits and SUT closure rules. A refusal raises
+    ``PreflightRefusedError`` or ``MaterializationError`` and returns no preparation.
+    Only disposable CACHE objects may be left behind by a materialization failure.
+    """
+    candidate = _preflight_run(
+        run_id,
+        planned_run,
+        realization=realization,
+        environment=environment,
+        manifest=manifest,
+        workspace=workspace,
+        check_source_assets=False,
+    )
+    if candidate.request is None:
+        raise PreflightRefusedError(candidate.report)
+    inputs = materialize_inputs(
+        workspace,
+        candidate.request.run_spec,
+        benchmark=benchmark,
+        scenario=scenario,
+        realization=realization,
+        system_under_test=system_under_test,
+        environment=environment,
+    )
+    return PreparedExecutionInputs(candidate.report, candidate.manifest_digest, inputs)
+
+
+def _preflight_run(
+    run_id: RunId,
+    planned_run: PlannedRun,
+    *,
+    realization: RealizationDefinition,
+    environment: EnvironmentDefinition,
+    manifest: WorkerEnvironmentManifest,
+    workspace: Workspace,
+    check_source_assets: bool,
+) -> PreflightedRun:
     run = parse_run_id(run_id)
     run_spec = planned_run.spec
     fingerprint = planned_run.fingerprint
@@ -638,7 +722,8 @@ def preflight_run(
         )
     refusals.extend(_identity_refusals(run_spec, realization, environment, manifest))
     refusals.extend(_capability_refusals(required, manifest, realization))
-    refusals.extend(_asset_refusals(workspace, realization))
+    if check_source_assets:
+        refusals.extend(_asset_refusals(workspace, realization))
     refusals.extend(_duplicate_refusals(workspace, run))
 
     try:
