@@ -30,6 +30,7 @@ from dynamisbench.identity import SemanticDigest, semantic_sha256
 
 __all__ = [
     "ADAPTER_IMPLEMENTATION_DIGESTS",
+    "PROTECTED_IMPLEMENTATION_DIGESTS",
     "PROTECTED_PROFILE_SCHEMA",
     "PinnedReferenceProfile",
     "build_protected_profile",
@@ -53,6 +54,23 @@ They include ``physics.compile_model``, the platform tag and the Python patch ve
 protected worker entry and bootstrap are execution-integration files covered by the runtime
 source closure, not additions to ``reference.ADAPTER_SOURCE_FILES``; adding an adapter source
 file would change these digests and require another owner decision.
+"""
+
+
+# RES-555 owner-selected 13-file schema-2 production execution identities. The v1
+# WorkerRequest adapter digest remains unchanged for wire/worker compatibility. The
+# supervisor independently binds the complete executed production entry to this second,
+# owner-adopted identity; both checks are mandatory for the protected reference route.
+PROTECTED_IMPLEMENTATION_DIGESTS: Final[dict[str, str]] = {
+    "windows-x86-64": "86d5e912fa876208e156bfe13f91be6a5cfde7f0aefcc9e0bbf3aedbc7051f20",
+    "linux-x86-64": "9ea31547f2246e2a8eedcaefcac8ae767086711c96ad79d5da835f72e5bc2ea1",
+}
+"""`dynamisbench.mujoco.implementation-identity/2` accepted conditionally on 2026-11-26.
+
+This identity includes the 10 historical adapter files, the exact materialized model
+hash, and protected_contracts.py, protected_worker.py and protected_bootstrap.py. No
+mutation of a bound file may silently change these accepted identities. The model and
+solver remain the pinned reference; the native-output ADR-027 gate remains separate.
 """
 
 
@@ -87,6 +105,7 @@ class PinnedReferenceProfile(DomainModel):
     protocol_version: int
     capabilities: tuple[Capability, ...]
     adapter_implementation_digest: Sha256Hex
+    production_implementation_digest: Sha256Hex
     model_source_path: str
     model_sha256: Sha256Hex
     benchmark_identifier: str
@@ -262,6 +281,7 @@ def build_protected_profile(
         protocol_version=WORKER_PROTOCOL_VERSION,
         capabilities=tuple(reference.CAPABILITIES),
         adapter_implementation_digest=ADAPTER_IMPLEMENTATION_DIGESTS[platform_tag],
+        production_implementation_digest=PROTECTED_IMPLEMENTATION_DIGESTS[platform_tag],
         model_source_path=reference.MODEL_SOURCE_PATH,
         model_sha256=reference.MODEL_SHA256,
         benchmark_identifier=reference.BENCHMARK_ID,

@@ -14,6 +14,7 @@ from dynamisbench.execution.contracts import (
 )
 from dynamisbench.execution.protected_profile import (
     ADAPTER_IMPLEMENTATION_DIGESTS,
+    PROTECTED_IMPLEMENTATION_DIGESTS,
     build_protected_profile,
 )
 from dynamisbench.identity import SemanticDigest
@@ -54,6 +55,8 @@ def test_the_canonical_reference_request_matches_the_profile(platform: str) -> N
     assert profile.authority_refusals(request) == ()
     assert profile.matches_request(request) is True
     assert profile.adapter_implementation_digest == ADAPTER_IMPLEMENTATION_DIGESTS[platform]
+    assert profile.production_implementation_digest == PROTECTED_IMPLEMENTATION_DIGESTS[platform]
+    assert profile.production_implementation_digest != profile.adapter_implementation_digest
     assert profile.model_source_path == reference.MODEL_SOURCE_PATH
     assert profile.model_sha256 == reference.MODEL_SHA256
     assert profile.reference_trajectory_sha256 == (
@@ -145,3 +148,15 @@ def test_a_changed_bootstrap_changes_the_profile(tmp_path: Path) -> None:
 
     assert original_profile.bootstrap_sha256 != changed_profile.bootstrap_sha256
     assert original_profile.digest() != changed_profile.digest()
+
+
+@pytest.mark.parametrize("platform", _PLATFORMS)
+def test_the_owner_accepted_production_identity_is_an_independent_profile_pin(
+    platform: str,
+) -> None:
+    """The accepted 13-file identity cannot be silently replaced by the v1 wire identity."""
+    profile = build_protected_profile(platform)
+    changed = profile.model_copy(update={"production_implementation_digest": "0" * 64})
+    assert profile.production_implementation_digest == PROTECTED_IMPLEMENTATION_DIGESTS[platform]
+    assert profile.digest() != changed.digest()
+    assert changed.adapter_implementation_digest == profile.adapter_implementation_digest
