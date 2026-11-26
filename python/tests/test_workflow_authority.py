@@ -35,15 +35,20 @@ QUALIFICATION_WORKFLOW = "quality.yml"
 IDENTITY_JOB = "platform-identity"
 
 # The eight required ADR-025 gates are these four jobs, each on both pinned images.
-# Additional jobs (for example the MuJoCo receipt comparator) are explicitly not gates and
-# must not be counted as one of the eight.
+# Additional jobs (the MuJoCo receipt comparator, the RES-555 B2 comparator and the
+# RES-555 protected-supervisor execution) are explicitly not gates and must not be
+# counted as one of the eight.
 REQUIRED_ADR025_GATES = (
     "platform-identity",
     "python",
     "frontend",
     "desktop",
 )
-ADDITIONAL_NON_GATE_JOBS = ("mujoco-receipt-comparison", "res555-gate-b2-comparison")
+ADDITIONAL_NON_GATE_JOBS = (
+    "mujoco-receipt-comparison",
+    "res555-gate-b2-comparison",
+    "res555-protected-supervisor",
+)
 
 # Pinned images, deliberately never ``-latest``: a qualification result has to be
 # interpretable against a named runner image. ``self-hosted`` is not a portable
@@ -173,6 +178,15 @@ def test_the_eight_required_adr025_gates_are_preserved() -> None:
         f"each required ADR-025 gate must run on {sorted(PORTABLE_TARGETS)}: {partial}"
     )
 
+    # Every job is either one of the eight required gates or an explicitly reviewed
+    # additional job. A new job cannot quietly become a ninth gate - and an entry left
+    # behind here cannot silently reserve a name for a job that no longer exists.
+    declared = set(REQUIRED_ADR025_GATES) | set(ADDITIONAL_NON_GATE_JOBS)
+    unreviewed = sorted(set(gates) - declared)
+    assert not unreviewed, f"unreviewed qualification job(s): {unreviewed}"
+    phantom = sorted(set(ADDITIONAL_NON_GATE_JOBS) - set(gates))
+    assert not phantom, f"additional non-gate jobs that no longer exist: {phantom}"
+
 
 def test_the_receipt_comparator_is_an_additional_non_gate_job() -> None:
     """The comparison is useful evidence but is not one of the eight required gates."""
@@ -191,6 +205,40 @@ def test_the_gate_b2_comparator_is_an_additional_non_gate_job() -> None:
     assert set(_resolved_images(job)) <= APPROVED_HOSTED_IMAGES
     assert set(_resolved_images(job)) != PORTABLE_TARGETS
     assert "res555-gate-b2-comparison" in ADDITIONAL_NON_GATE_JOBS
+
+
+def test_the_protected_supervisor_is_an_additional_non_gate_job() -> None:
+    """The real protected execution is Linux evidence, not a ninth ADR-025 gate.
+
+    It runs on one pinned image because the adopted mechanism it exercises -
+    Landlock, seccomp, a delegated cgroup v2 subtree and a dedicated scratch
+    filesystem - is the Linux mechanism. The generic ``python`` gate still runs on
+    both images, and the Windows contract step stays in that gate.
+    """
+    job = _gates()["res555-protected-supervisor"]
+    assert job["name"] == "res555-protected-supervisor"
+    assert set(_resolved_images(job)) == {"ubuntu-24.04"}
+    assert "res555-protected-supervisor" in ADDITIONAL_NON_GATE_JOBS
+    assert "res555-protected-supervisor" not in REQUIRED_ADR025_GATES
+
+
+def test_the_protected_supervisor_executes_the_fail_closed_route() -> None:
+    """The job must run the real pinned-reference route, not a contract-only stub.
+
+    Both opt-ins are asserted: one makes the module runnable, the other makes a
+    missing mechanism a failure rather than a skip. An absent mechanism may never
+    fall back to an unprotected launch, so the step may not tolerate failure.
+    """
+    job = _gates()["res555-protected-supervisor"]
+    steps = {str(step.get("name", "")): step for step in job["steps"]}
+    execution = steps.get("Run the protected pinned-reference supervisor execution")
+    assert execution is not None, "the job must execute the protected supervisor module"
+    run = str(execution.get("run", ""))
+    assert "tests/execution/mujoco/test_protected_supervisor_execution.py" in run
+    env = execution.get("env") or {}
+    assert env.get("DYNAMISBENCH_PROTECTED_ROUTE") == "1"
+    assert env.get("DYNAMISBENCH_REQUIRE_PROTECTED_ROUTE") == "1"
+    assert not execution.get("continue-on-error")
 
 
 PYTHON_VERSION_FILE = REPO_ROOT / "python" / ".python-version"
@@ -363,6 +411,14 @@ EXPECTED_ARTIFACTS: dict[str, tuple[dict[str, object], ...]] = {
             "retention-days": 90,
         },
     ),
+    "res555-protected-supervisor": (
+        {
+            "name": "res555-protected-supervisor-linux-x64",
+            "path": "python/evidence/res555-protected-supervisor/",
+            "if-no-files-found": "error",
+            "retention-days": 90,
+        },
+    ),
 }
 
 NO_ARTIFACT_JOBS = ("desktop",)
@@ -374,7 +430,9 @@ def test_qualification_artifacts_publish_exactly_their_intended_surface() -> Non
     A same-prefix allowance admits any number of artifacts under that prefix, which
     is a publication surface rather than an authority. The identity record, the M1
     report, Arrow allocation receipts, the two platform MuJoCo receipts and their
-    comparison are the whole of it; desktop publishes no qualification artifact.
+    comparison, the two platform B2 probe records and their comparison, and the
+    Linux protected-supervisor record are the whole of it; desktop publishes no
+    qualification artifact.
     """
     gates = _gates()
     unexpected = set(gates) - set(EXPECTED_ARTIFACTS) - set(NO_ARTIFACT_JOBS)
