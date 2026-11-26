@@ -18,16 +18,17 @@ failure before the worker is a bounded stderr line and exit 2; no request is ans
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import os
 import sys
+import types
 from pathlib import Path
 from typing import Any, Final
 
 SCHEMA: Final = "dynamisbench.protected.sandbox/1"
 MAX_CONFIG_BYTES: Final = 256 * 1024
 MAX_BOOTSTRAP_BYTES: Final = 256 * 1024
+MAX_MODULE_BYTES: Final = 256 * 1024
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -74,7 +75,9 @@ def _read_config(expected_sha256: str) -> dict[str, Any]:
         "site_packages",
         "base_prefix",
         "landlock_module",
+        "landlock_module_sha256",
         "seccomp_module",
+        "seccomp_module_sha256",
         "read_execute",
         "read_only",
         "read_write",
@@ -134,15 +137,26 @@ def _sanitize_environment(scratch: Path) -> list[str]:
     return sorted(os.environ)
 
 
-def _fixed_module(source_root: Path, relative: str) -> Any:
-    path = (source_root / relative).resolve()
+def _pinned_module(source_root: Path, path_text: str, expected_sha256: str, name: str) -> Any:
+    """Load one sandbox module from bytes that match the supervisor-pinned digest.
+
+    The digest comes from the pinned sandbox config, which the bootstrap verifies before
+    reading any value. The module is executed from the verified bytes rather than imported
+    from its path, so a same-user writer cannot swap the file between the digest check and
+    the import. This is the Linux half of owner condition F2; the supervisor additionally
+    re-measures the whole source closure before and after the attempt.
+    """
+    path = Path(path_text).resolve()
     if not path.is_relative_to(source_root.resolve()) or not path.is_file():
         raise ValueError("a protected sandbox module is outside the measured source root")
-    spec = importlib.util.spec_from_file_location("_protected_" + path.stem, path)
-    if spec is None or spec.loader is None:
-        raise ValueError("a protected sandbox module could not be loaded")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    raw = path.read_bytes()
+    if len(raw) > MAX_MODULE_BYTES:
+        raise ValueError("a protected sandbox module exceeds its bound")
+    if _sha256_bytes(raw) != expected_sha256:
+        raise ValueError("a protected sandbox module is not the supervisor-pinned bytes")
+    module = types.ModuleType(name)
+    module.__file__ = str(path)
+    exec(compile(raw, str(path), "exec"), module.__dict__)  # noqa: S102 - verified bytes
     return module
 
 
@@ -150,8 +164,18 @@ def _apply_limits_and_sandbox(config: dict[str, Any]) -> tuple[int, dict[str, ob
     source_root = Path(config["source_root"]).resolve()
     if config["mechanism"] != "linux-landlock":
         return 0, {}
-    landlock = _fixed_module(source_root, "dynamisbench/execution/landlock.py")
-    seccomp = _fixed_module(source_root, "dynamisbench/execution/seccomp.py")
+    landlock = _pinned_module(
+        source_root,
+        str(config["landlock_module"]),
+        str(config["landlock_module_sha256"]),
+        "_protected_landlock",
+    )
+    seccomp = _pinned_module(
+        source_root,
+        str(config["seccomp_module"]),
+        str(config["seccomp_module_sha256"]),
+        "_protected_seccomp",
+    )
     landlock.apply_limits(
         memory_bytes=int(config["memory_limit_bytes"]),
         cpu_seconds=int(config["cpu_time_seconds"]),
@@ -188,6 +212,9 @@ def _write_ready(
         "environment_sanitized": True,
         "environment_keys": environment_keys,
         "seccomp": seccomp,
+        # The supervisor samples this process's own status; its own Popen pid is the
+        # attach launcher, which has not applied no_new_privs or seccomp yet.
+        "worker_pid": os.getpid(),
     }
     data = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
     (scratch / "sandbox-ready.json").write_bytes(data)

@@ -251,10 +251,18 @@ def _last_error() -> int:
 
 
 def _system32_tool(name: str) -> str:
-    root = os.environ.get("SYSTEMROOT") or os.environ.get("SystemRoot") or "C:/Windows"
-    candidate = Path(root) / "System32" / name
+    """Resolve a privileged helper from the kernel's system directory, not the environment.
+
+    `%SYSTEMROOT%` is caller-controlled; resolving `icacls.exe` from it would let a caller
+    choose a program that runs with the supervisor's privileges.
+    """
+    buffer = ctypes.create_unicode_buffer(261)
+    length = _kernel32().GetSystemDirectoryW(buffer, len(buffer))
+    if length == 0 or length >= len(buffer):
+        raise AppContainerError("the Windows system directory could not be resolved")
+    candidate = Path(buffer.value) / name
     if not candidate.is_file():
-        raise AppContainerError(f"the system tool {name!r} is not present in System32")
+        raise AppContainerError(f"the system tool {name!r} is not present in the system directory")
     return str(candidate)
 
 
@@ -370,6 +378,8 @@ def _configure_kernel32() -> None:
         ctypes.POINTER(_ProcessInformation),
     ]
     api.CreateProcessW.restype = wintypes.BOOL
+    api.GetSystemDirectoryW.argtypes = [wintypes.LPWSTR, wintypes.UINT]
+    api.GetSystemDirectoryW.restype = wintypes.UINT
     api.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
     api.CreateJobObjectW.restype = ctypes.c_void_p
     api.SetInformationJobObject.argtypes = [

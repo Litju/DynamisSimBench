@@ -12,6 +12,7 @@ import pytest
 from dynamisbench.adapters.mujoco import reference
 from dynamisbench.adapters.mujoco.protected_contracts import (
     ConsumptionReceipt,
+    ImportedModule,
     ModelConsumption,
     PhysicsObservation,
     ProbeObservation,
@@ -20,17 +21,38 @@ from dynamisbench.adapters.mujoco.protected_contracts import (
 )
 from dynamisbench.execution.input_binding import WorkerInputBinding
 from dynamisbench.execution.protected_launch import (
+    ProbeTargets,
     ProtectedExecutionRoute,
     ProtectedLaunchError,
     RuntimeExpectation,
     consume_binding,
     correlate_receipt,
+    expected_probe_outcomes,
     prepare_protected_route,
 )
 from dynamisbench.execution.protected_profile import build_protected_profile
 from dynamisbench.workspace import Workspace
 
 _DIGEST = "a" * 64
+_TARGETS = ProbeTargets(
+    forbidden_reads=("/staging/sentinel.txt",),
+    forbidden_writes=("/inputs/forbidden-write.txt",),
+    forbidden_deletes=("/inputs/binding.json",),
+    allowed_read="/inputs/binding.json",
+    allowed_write="/scratch/probe-write.txt",
+    runtime_write="/runtime/protected-write.txt",
+    network_port=1234,
+    network_udp_port=1235,
+    write_token="token",
+)
+_DEPENDENCY_CLOSURE = "c" * 64
+_SOURCE_MANIFEST = tuple(
+    {
+        "path": relative,
+        "sha256": (reference.MODEL_SHA256 if relative == reference.MODEL_ASSET_PATH else _DIGEST),
+    }
+    for relative in sorted(reference.ADAPTER_SOURCE_FILES)
+)
 
 
 def _binding(**overrides: str) -> WorkerInputBinding:
@@ -81,8 +103,8 @@ def _receipt(profile, binding: WorkerInputBinding, expectation: RuntimeExpectati
         adapter_implementation_sha256=binding.adapter_implementation_sha256,
         runtime_closure_sha256=expectation.protected_digest,
         isolation_profile_sha256=profile.digest(),
-        source_manifest=({"path": "physics.py", "sha256": _DIGEST},),
-        dependency_closure_digest="c" * 64,
+        source_manifest=_SOURCE_MANIFEST,
+        dependency_closure_digest=_DEPENDENCY_CLOSURE,
         runtime_summary=WorkerRuntimeSummary(
             executable_sha256=expectation.executable_sha256,
             base_digest=expectation.base_digest,
@@ -90,14 +112,21 @@ def _receipt(profile, binding: WorkerInputBinding, expectation: RuntimeExpectati
             source_digest=expectation.source_digest,
             combined_digest=expectation.protected_digest,
         ),
-        imports=(),
-        probes=(
-            ProbeObservation(
-                name="allowed_input_read",
-                expectation="allowed",
-                observed="allowed",
-                detail="read succeeded",
+        imports=(
+            ImportedModule(
+                module="dynamisbench",
+                file="runtime/src/dynamisbench/__init__.py",
+                under_runtime=True,
             ),
+        ),
+        probes=tuple(
+            ProbeObservation(
+                name=name,
+                expectation=expectation,  # type: ignore[arg-type]
+                observed=expectation,  # type: ignore[arg-type]
+                detail="test observation",
+            )
+            for name, expectation in sorted(expected_probe_outcomes(_TARGETS).items())
         ),
         model=ModelConsumption(
             logical_path=reference.MODEL_SOURCE_PATH,
@@ -139,6 +168,9 @@ def _correlate(receipt, binding, profile, expectation, *, windows: bool = False)
         request=cast(object, request),  # type: ignore[arg-type]
         profile=profile,
         runtime=expectation,
+        dependency_closure_digest=_DEPENDENCY_CLOSURE,
+        model_size_bytes=len(reference.model_bytes()),
+        expected_probes=expected_probe_outcomes(_TARGETS),
         windows=windows,
     )
 
@@ -210,6 +242,84 @@ def test_a_receipt_for_a_different_runtime_is_refused() -> None:
     assert any("different runtime" in item.message for item in refusals)
 
 
+def test_a_completed_receipt_with_a_failure_text_is_refused() -> None:
+    profile = build_protected_profile(reference.platform_tag())
+    binding = _binding()
+    expectation = _runtime_expectation(profile)
+    receipt = _receipt(profile, binding, expectation)
+    substituted = receipt.model_copy(update={"failure": "a worker-side failure"})
+
+    _checks, refusals, _trajectory = _correlate(substituted, binding, profile, expectation)
+
+    assert [item.message for item in refusals] == [
+        "the protected receipt disagrees with the supervisor: receipt_failure_absent"
+    ]
+
+
+def test_a_receipt_with_an_incomplete_source_manifest_is_refused() -> None:
+    profile = build_protected_profile(reference.platform_tag())
+    binding = _binding()
+    expectation = _runtime_expectation(profile)
+    receipt = _receipt(profile, binding, expectation)
+    substituted = receipt.model_copy(update={"source_manifest": receipt.source_manifest[:-1]})
+
+    _checks, refusals, _trajectory = _correlate(substituted, binding, profile, expectation)
+
+    assert any("source manifest" in item.message for item in refusals)
+
+
+def test_a_receipt_with_a_different_dependency_closure_is_refused() -> None:
+    profile = build_protected_profile(reference.platform_tag())
+    binding = _binding()
+    expectation = _runtime_expectation(profile)
+    receipt = _receipt(profile, binding, expectation)
+    substituted = receipt.model_copy(update={"dependency_closure_digest": "0" * 64})
+
+    _checks, refusals, _trajectory = _correlate(substituted, binding, profile, expectation)
+
+    assert [item.message for item in refusals] == [
+        "the protected receipt disagrees with the supervisor: receipt_dependency_closure"
+    ]
+
+
+def test_a_receipt_with_an_import_outside_the_runtime_is_refused() -> None:
+    profile = build_protected_profile(reference.platform_tag())
+    binding = _binding()
+    expectation = _runtime_expectation(profile)
+    receipt = _receipt(profile, binding, expectation)
+    substituted = receipt.model_copy(
+        update={
+            "imports": (
+                ImportedModule(
+                    module="mujoco",
+                    file="C:/host/site-packages/mujoco/__init__.py",
+                    under_runtime=False,
+                ),
+            )
+        }
+    )
+
+    _checks, refusals, _trajectory = _correlate(substituted, binding, profile, expectation)
+
+    assert any("outside the worker's measured runtime" in item.message for item in refusals)
+
+
+def test_a_receipt_that_does_not_reach_the_pinned_duration_is_refused() -> None:
+    profile = build_protected_profile(reference.platform_tag())
+    binding = _binding()
+    expectation = _runtime_expectation(profile)
+    receipt = _receipt(profile, binding, expectation)
+    physics = receipt.physics
+    assert physics is not None
+    substituted = receipt.model_copy(
+        update={"physics": physics.model_copy(update={"final_time_s": 1.5})}
+    )
+
+    _checks, refusals, _trajectory = _correlate(substituted, binding, profile, expectation)
+
+    assert any("pinned duration" in item.message for item in refusals)
+
+
 def test_a_non_canonical_receipt_is_refused() -> None:
     profile = build_protected_profile(reference.platform_tag())
     binding = _binding()
@@ -227,6 +337,9 @@ def test_a_non_canonical_receipt_is_refused() -> None:
         request=cast(object, request),  # type: ignore[arg-type]
         profile=profile,
         runtime=expectation,
+        dependency_closure_digest=_DEPENDENCY_CLOSURE,
+        model_size_bytes=len(reference.model_bytes()),
+        expected_probes=expected_probe_outcomes(_TARGETS),
         windows=False,
     )
 
@@ -238,14 +351,9 @@ def test_a_windows_udp_probe_is_informational_only() -> None:
     binding = _binding()
     expectation = _runtime_expectation(profile)
     receipt = _receipt(profile, binding, expectation)
-    probes = (
-        *receipt.probes,
-        ProbeObservation(
-            name="network_udp",
-            expectation="denied",
-            observed="allowed",
-            detail="sendto returned 6",
-        ),
+    probes = tuple(
+        probe.model_copy(update={"observed": "allowed"}) if probe.name == "network_udp" else probe
+        for probe in receipt.probes
     )
     substituted = receipt.model_copy(update={"probes": probes})
 
@@ -260,16 +368,97 @@ def test_a_windows_udp_probe_is_informational_only() -> None:
     assert all(check["passed"] for check in windows_checks if check["name"] == "receipt_probes")
 
 
+def test_a_receipt_that_omits_a_requested_probe_is_refused() -> None:
+    profile = build_protected_profile(reference.platform_tag())
+    binding = _binding()
+    expectation = _runtime_expectation(profile)
+    receipt = _receipt(profile, binding, expectation)
+    substituted = receipt.model_copy(update={"probes": receipt.probes[1:]})
+
+    _checks, refusals, _trajectory = _correlate(substituted, binding, profile, expectation)
+
+    assert any("exactly the probes" in item.message for item in refusals)
+
+
+def test_a_receipt_that_relabels_a_probe_expectation_is_refused() -> None:
+    profile = build_protected_profile(reference.platform_tag())
+    binding = _binding()
+    expectation = _runtime_expectation(profile)
+    receipt = _receipt(profile, binding, expectation)
+    probes = tuple(
+        probe.model_copy(update={"expectation": "allowed", "observed": "allowed"})
+        if probe.name == "runtime_write"
+        else probe
+        for probe in receipt.probes
+    )
+
+    _checks, refusals, _trajectory = _correlate(
+        receipt.model_copy(update={"probes": probes}), binding, profile, expectation
+    )
+
+    assert any("exactly the probes" in item.message for item in refusals)
+
+
 def test_a_replayed_binding_is_refused(tmp_path: Path) -> None:
     route = cast(
         ProtectedExecutionRoute,
         SimpleNamespace(runtime=SimpleNamespace(registry_root=tmp_path / "registry")),
     )
+    staging = tmp_path / "workspace" / ".staging"
 
-    consume_binding(route, "e" * 64, "f" * 64)
+    consume_binding(route, "e" * 64, staging, "f" * 64)
 
     with pytest.raises(ProtectedLaunchError, match="already used"):
-        consume_binding(route, "e" * 64, "f" * 64)
+        consume_binding(route, "e" * 64, staging, "f" * 64)
+
+    # A different workspace is a different admission target, so the same request may run
+    # again there; only the pair is single-use.
+    consume_binding(route, "e" * 64, tmp_path / "other" / ".staging", "f" * 64)
+
+
+def test_the_protected_route_is_not_reachable_from_the_application_surfaces() -> None:
+    """No API, CLI, entry point or desktop-facing module may import the protected route.
+
+    The route is an internal activation decision. A module that imports it would be a
+    candidate for reaching it without the owner's activation requirements, so the guard is a
+    source scan over the application surfaces rather than a promise in a document.
+    """
+    root = Path(__file__).resolve().parents[2] / "src" / "dynamisbench"
+    surfaces = [
+        root / "api",
+        root / "cli.py",
+        root / "__main__.py",
+        root / "query",
+        root / "workspace",
+    ]
+    offenders: dict[str, list[str]] = {}
+    for surface in surfaces:
+        candidates = surface.rglob("*.py") if surface.is_dir() else [surface]
+        for path in candidates:
+            text = path.read_text(encoding="utf-8")
+            hits = [
+                name
+                for name in ("protected_launch", "protected_worker", "protected_runtime")
+                if name in text
+            ]
+            if hits:
+                offenders[path.relative_to(root).as_posix()] = hits
+
+    assert offenders == {}
+
+
+def test_the_protected_route_is_not_enabled_by_an_environment_variable() -> None:
+    """The activation is the passed route, not an environment switch."""
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "dynamisbench"
+        / "execution"
+        / "protected_launch.py"
+    ).read_text(encoding="utf-8")
+
+    for marker in ("os.environ[", "os.getenv(", "getenv("):
+        assert marker not in source, marker
 
 
 def test_the_tree_owns_and_closes_the_platform_primitive() -> None:
@@ -352,6 +541,36 @@ def test_a_non_linux_dedicated_scratch_is_refused(monkeypatch: pytest.MonkeyPatc
 
     with pytest.raises(ProtectedLaunchError, match="dedicated scratch"):
         platform.open()
+
+
+def test_the_profile_matches_the_committed_reference() -> None:
+    """The frozen profile must reproduce the committed reference file exactly.
+
+    The profile hard-codes the reference so a worker cannot choose it. This test is the other
+    half: the hard-coded values are the ones the repository committed.
+    """
+    import json
+
+    repository = Path(__file__).resolve().parents[3]
+    committed = json.loads(
+        (repository / "evidence" / "RES-555" / "gate-b2" / "reference-observation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    profile = build_protected_profile(reference.platform_tag())
+
+    assert profile.model_sha256 == committed["model_sha256"]
+    assert profile.steps == committed["steps"]
+    assert profile.timestep_s == committed["timestep_s"]
+    assert profile.duration_s == committed["duration_s"]
+    assert profile.reference_trajectory_sha256 == committed["trajectory_sha256"]
+    assert profile.expected_final_angle_rad == committed["expected_final_angle_rad"]
+    assert (
+        profile.expected_final_angular_velocity_rad_s
+        == committed["expected_final_angular_velocity_rad_s"]
+    )
+    assert profile.expected_energy_initial_j == committed["expected_energy_initial_j"]
+    assert profile.expected_energy_final_j == committed["expected_energy_final_j"]
 
 
 def test_the_pinned_profile_refuses_a_different_admitted_request(tmp_path: Path) -> None:

@@ -76,6 +76,12 @@ class ProtectedNetworkCanary:
     def unix_connections(self) -> int:
         return self._count("unix_accepted")
 
+    @property
+    def cycles(self) -> int:
+        """Completed listener cycles; a drain that does not advance this did not settle."""
+        with self._lock:
+            return int(self._cycles)
+
     def _count(self, name: str) -> int:
         with self._lock:
             return int(getattr(self, name))

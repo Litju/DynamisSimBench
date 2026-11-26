@@ -91,11 +91,20 @@ def test_the_supervisor_environment_is_minimal(
 
 
 def _fake_runtime(tmp_path: Path) -> ProtectedRuntime:
+    from dynamisbench.adapters.mujoco.protected_contracts import ClosureEntry
+
     source = tmp_path / "src"
     site = tmp_path / "site"
     source.mkdir()
     site.mkdir()
     environment = SimpleNamespace(site_packages=site, source_root=source)
+    entries = tuple(
+        ClosureEntry(path=relative, size_bytes=1, sha256="a" * 64)
+        for relative in (
+            "dynamisbench/execution/landlock.py",
+            "dynamisbench/execution/seccomp.py",
+        )
+    )
     return cast(
         ProtectedRuntime,
         SimpleNamespace(
@@ -103,6 +112,7 @@ def _fake_runtime(tmp_path: Path) -> ProtectedRuntime:
             site_packages=site,
             base_prefix=tmp_path / "base",
             environment=environment,
+            snapshot=SimpleNamespace(source=SimpleNamespace(entries=entries)),
             protected_digest="d" * 64,
             venv_config_path=tmp_path / "pyvenv.cfg",
             venv_config_sha256="e" * 64,
@@ -135,6 +145,8 @@ def test_the_config_is_canonical_and_pins_the_runtime_fields(tmp_path: Path) -> 
     assert config["runtime_closure_sha256"] == runtime.protected_digest
     assert config["max_scratch_entries"] == profile.max_scratch_entries
     assert config["venv_config_sha256"] == runtime.venv_config_sha256
+    assert config["landlock_module_sha256"] == "a" * 64
+    assert config["seccomp_module_sha256"] == "a" * 64
     with pytest.raises(ProtectedRuntimeError):
         write_protected_sandbox_config(path, config)
 

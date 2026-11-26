@@ -858,9 +858,16 @@ def _execute_preflighted(
         if protected.route.workspace is not None and (
             protected.route.workspace.source_root != workspace.source_root
         ):
-            raise protected_launch.ProtectedLaunchError(
-                RefusalCode.FORBIDDEN_PATH,
-                "the protected route belongs to a different workspace than the admission",
+            return _refused_without_process(
+                request=request,
+                state=RunLifecycleState.REFUSED,
+                refusals=[
+                    refusal(
+                        RefusalCode.FORBIDDEN_PATH,
+                        "the protected route belongs to a different workspace than the admission",
+                    )
+                ],
+                observer=observer,
             )
 
     initial_refusals = admission_refusals(
@@ -897,6 +904,7 @@ def _execute_preflighted(
     stdout_bytes = b""
     response: WorkerResponse | None = None
     response_matches = False
+    protected_tree_closed = False
 
     _notify(observer, RunLifecycleState.STARTING)
     try:
@@ -1080,8 +1088,8 @@ def _execute_preflighted(
                     observer=observer,
                 )
             working_directory = protected_attempt.attempt
-            command = list(protected_attempt.command)
-            launch_environment = protected_attempt.environment
+            command: list[str] = []
+            launch_environment: dict[str, str] = {}
         else:
             assert program is not None and working_directory is not None
             launch_environment = worker_environment(manifest, temporary_directory=working_directory)
@@ -1132,16 +1140,30 @@ def _execute_preflighted(
             )
 
         worker_pid = process.pid
-        deadline = time.monotonic() + manifest.timeout_seconds
+        if protected_attempt is not None:
+            # The profile's wall clock is the protected bound; the manifest timeout belongs
+            # to the diagnostic worker and may be longer.
+            wall_seconds = min(
+                manifest.timeout_seconds, protected_attempt.route.profile.max_wall_seconds
+            )
+            stdout_limit = protected_attempt.route.profile.max_stdout_bytes
+            stderr_limit = min(
+                manifest.max_log_bytes, protected_attempt.route.profile.max_stderr_bytes
+            )
+        else:
+            wall_seconds = manifest.timeout_seconds
+            stdout_limit = MAX_WORKER_MESSAGE_BYTES
+            stderr_limit = manifest.max_log_bytes
+        deadline = time.monotonic() + wall_seconds
         _notify(observer, RunLifecycleState.RUNNING)
         assert process.stdout is not None
         assert process.stderr is not None
         assert process.stdin is not None
         stdout_reader = _BoundedStreamReader(
-            process.stdout, limit=MAX_WORKER_MESSAGE_BYTES, fail_on_overflow=True
+            process.stdout, limit=stdout_limit, fail_on_overflow=True
         )
         stderr_reader = _BoundedStreamReader(
-            process.stderr, limit=manifest.max_log_bytes, fail_on_overflow=False
+            process.stderr, limit=stderr_limit, fail_on_overflow=False
         )
         stdin_writer = _StdinWriter(process.stdin, request_bytes)
         stdout_reader.start()
@@ -1286,22 +1308,54 @@ def _execute_preflighted(
         if protected_attempt is not None:
             # Correlate the finished attempt with the supervisor's own measurements. The
             # worker receipt is untrusted input; the checks and refusals are the supervisor's.
+            # Any failure here is a terminal refusal, never an escaping exception.
             from dynamisbench.execution.protected_launch import ProtectedLaunchError
 
-            correlation = protected_attempt.observe(
-                exit_code=exit_code,
-                response=response,
-                response_matches=response_matches,
-                stdout_truncated=stdout_truncated
-                or stop_reason is RefusalCode.WORKER_OUTPUT_TOO_LARGE,
-                stdin_delivered=stdin_delivered,
-            )
+            try:
+                correlation = protected_attempt.observe(
+                    exit_code=exit_code,
+                    response=response,
+                    response_matches=response_matches,
+                    stdout_truncated=stdout_truncated
+                    or stop_reason is RefusalCode.WORKER_OUTPUT_TOO_LARGE,
+                    stdin_delivered=stdin_delivered,
+                )
+            except Exception as error:  # noqa: BLE001 - a refused correlation is terminal
+                refusals.append(
+                    refusal(
+                        RefusalCode.WORKER_FAILED,
+                        f"the protected correlation could not be completed: {type(error).__name__}",
+                    )
+                )
+                correlation = []
             refusals.extend(correlation)
             if refusals and state is RunLifecycleState.COMPLETED:
                 state = RunLifecycleState.FAILED
-            if bundle is not None:
+            if tree is not None:
                 try:
-                    protected_attempt.persist(bundle, state=state, refusals=tuple(refusals))
+                    tree.close()
+                except Exception:  # noqa: BLE001 - cleanup is best effort
+                    pass
+                protected_tree_closed = True
+                if bool(getattr(tree, "cleanup_failed", False)):
+                    refusals.append(
+                        refusal(
+                            RefusalCode.WORKER_FAILED,
+                            "the protected ownership primitive could not be released",
+                        )
+                    )
+                    if state is RunLifecycleState.COMPLETED:
+                        state = RunLifecycleState.FAILED
+            if bundle is not None and protected_attempt.record is not None:
+                try:
+                    protected_attempt.persist(
+                        bundle,
+                        state=state,
+                        refusals=tuple(refusals),
+                        process_tree_cleaned=process_tree_cleaned,
+                        stdout_bytes=len(stdout_bytes),
+                        stderr_bytes=len(stderr_bytes),
+                    )
                 except (EvidenceError, ProtectedLaunchError):
                     refusals.append(
                         refusal(
@@ -1326,13 +1380,21 @@ def _execute_preflighted(
                 except OSError:
                     pass
         if tree is not None:
-            try:
-                process_tree_cleaned = tree.wait_empty(_TERMINATION_GRACE_SECONDS) and (
-                    process_tree_cleaned or process is None
+            if protected_tree_closed:
+                # The protected branch already closed the ownership primitive, so its
+                # emptiness proof and release result are final; re-reading a closed job or
+                # cgroup would report a false negative.
+                process_tree_cleaned = process_tree_cleaned and not bool(
+                    getattr(tree, "cleanup_failed", False)
                 )
-            except OSError:
-                process_tree_cleaned = False
-            tree.close()
+            else:
+                try:
+                    process_tree_cleaned = tree.wait_empty(_TERMINATION_GRACE_SECONDS) and (
+                        process_tree_cleaned or process is None
+                    )
+                except OSError:
+                    process_tree_cleaned = False
+                tree.close()
         if stdin_writer is not None:
             stdin_writer.join(_JOIN_SECONDS)
             stdin_delivered = stdin_delivered or stdin_writer.delivered

@@ -28,7 +28,9 @@ def _write_config(path: Path, *, value: dict[str, object] | None = None) -> byte
         "site_packages": str(path.parent / "site"),
         "base_prefix": str(path.parent / "base"),
         "landlock_module": str(path.parent / "src" / "landlock.py"),
+        "landlock_module_sha256": "0" * 64,
         "seccomp_module": str(path.parent / "src" / "seccomp.py"),
+        "seccomp_module_sha256": "0" * 64,
         "read_execute": [],
         "read_only": [],
         "read_write": [],
@@ -84,7 +86,22 @@ def test_a_module_outside_the_measured_source_is_refused(tmp_path: Path) -> None
     outside.write_text("raise SystemExit('should not load')\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="outside"):
-        protected_bootstrap._fixed_module(source, "../outside.py")
+        protected_bootstrap._pinned_module(source, str(outside), "0" * 64, "_probe")
+
+
+def test_a_sandbox_module_that_is_not_the_pinned_bytes_is_refused(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    module = source / "dynamisbench" / "execution" / "landlock.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("VALUE = 1\n", encoding="utf-8")
+    digest = hashlib.sha256(module.read_bytes()).hexdigest()
+
+    loaded = protected_bootstrap._pinned_module(source, str(module), digest, "_probe")
+    assert loaded.VALUE == 1
+
+    module.write_text("VALUE = 2\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="supervisor-pinned"):
+        protected_bootstrap._pinned_module(source, str(module), digest, "_probe")
 
 
 def test_the_bootstrap_refuses_without_isolated_site(tmp_path: Path) -> None:
@@ -141,7 +158,13 @@ def test_the_bootstrap_consumes_its_arguments_before_the_worker(
         "base_prefix": str(base_prefix),
         "keep_paths": [str(base_prefix)],
         "landlock_module": str(source_root / "dynamisbench" / "execution" / "landlock.py"),
+        "landlock_module_sha256": hashlib.sha256(
+            (source_root / "dynamisbench" / "execution" / "landlock.py").read_bytes()
+        ).hexdigest(),
         "seccomp_module": str(source_root / "dynamisbench" / "execution" / "seccomp.py"),
+        "seccomp_module_sha256": hashlib.sha256(
+            (source_root / "dynamisbench" / "execution" / "seccomp.py").read_bytes()
+        ).hexdigest(),
         "read_execute": [],
         "read_only": [],
         "read_write": [],

@@ -20,11 +20,15 @@ before a process exists, or produces a correlated refusal after exit. There is n
 that starts an unsandboxed worker because the sandbox is unavailable, the receipt is missing,
 the runtime moved, or a limit was exceeded.
 
-**The worker is untrusted.** ``scratch/consumption.json`` is read as untrusted input and only
-the supervisor's own correlation, external token/cgroup facts and independent measurements
-make the attempt admissible. The persisted record is a supervisor-authored diagnostic
-(``protected-consumption.json``), not native evidence, not canonical output, not an
-assessment and not a seal.
+**The worker is untrusted, but not independently re-executed.** ``scratch/consumption.json``
+is read as untrusted input and correlated with the supervisor's own measurements: the exact
+runtime roots, the verified input view, the external token/``proc`` facts, the single-use
+binding and the committed reference constants. That makes the *process* admissible; it does
+not independently reproduce the physics. A worker that fabricates a canonical receipt with
+the pinned constants is not excluded by this boundary, which is why the pinned adapter is
+trusted code and why the persisted record is a supervisor-authored diagnostic
+(``protected-consumption.json``) rather than native evidence, canonical output, an
+assessment or a seal.
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -108,7 +113,11 @@ from dynamisbench.execution.protected_scratch import (
 )
 from dynamisbench.host.protected_canary import ProtectedNetworkCanary
 from dynamisbench.identity import canonical_semantic_bytes, semantic_sha256
-from dynamisbench.materialization import MaterializationStore
+from dynamisbench.materialization import (
+    MaterializationError,
+    MaterializationRefusalCode,
+    MaterializationStore,
+)
 from dynamisbench.workspace import PersistenceClass, Workspace
 
 __all__ = [
@@ -130,9 +139,10 @@ PROTECTED_RECORD_MEDIA_TYPE: Final = "application/vnd.dynamisbench.protected-con
 """How ``protected-consumption.json`` is described: a supervisor diagnostic, not evidence."""
 
 _MODEL_ASSET_RELATIVE: Final = "assets/reference_pendulum.xml"
+_WORKER_ENTRY_RELATIVE: Final = "dynamisbench/adapters/mujoco/protected_worker.py"
+_TIME_TOLERANCE_S: Final = 1e-9
 _MAX_SANDBOX_READY_BYTES: Final = 64 * 1024
 _MAX_SMALL_FILE_BYTES: Final = 256 * 1024
-_RECORD_LIMIT_BYTES: Final = 2 * 1024 * 1024
 _POLL_SECONDS: Final = 0.02
 
 _LINUX_SYSTEM_READ_EXECUTE: Final = (
@@ -226,6 +236,7 @@ class ProtectedConsumptionRecord(DomainModel):
     worker_selection_sha256: Sha256Hex
     launch_nonce: Sha256Hex
     bootstrap_sha256: Sha256Hex
+    worker_entry_sha256: Sha256Hex
     sandbox_config_sha256: Sha256Hex
     runtime_closure_sha256: Sha256Hex
     source_runtime_digest: Sha256Hex
@@ -241,6 +252,7 @@ class ProtectedConsumptionRecord(DomainModel):
     receipt_sha256: Sha256Hex | None
     receipt_completed: bool | None
     receipt_failure: str | None
+    receipt_document: dict[str, object] | None
     receipt: dict[str, object] | None
     probes: tuple[ProbeObservation, ...]
     checks: tuple[dict[str, object], ...]
@@ -278,17 +290,42 @@ def write_protected_input_view(
     (root / "definitions").mkdir()
     (root / "binding.json").write_bytes(canonical_semantic_bytes(binding))
     (root / "manifest.json").write_bytes(
-        store.manifest_path(prepared.inputs.manifest_digest.hex).read_bytes()
+        _read_cas_object(
+            store.manifest_path(prepared.inputs.manifest_digest.hex),
+            prepared.inputs.manifest_digest.hex,
+            limit=_MAX_SMALL_FILE_BYTES,
+        )
     )
     for item in prepared.inputs.manifest.definitions:
         (root / "definitions" / f"{item.kind.value}.json").write_bytes(
-            store.object_path(item.semantic_digest.hex).read_bytes()
+            _read_cas_object(
+                store.object_path(item.semantic_digest.hex),
+                item.semantic_digest.hex,
+                limit=_MAX_SMALL_FILE_BYTES,
+            )
         )
     for item in prepared.inputs.manifest.assets:
         path = root / "assets" / item.logical_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(store.object_path(item.observed_sha256).read_bytes())
+        path.write_bytes(
+            _read_cas_object(
+                store.object_path(item.observed_sha256),
+                item.observed_sha256,
+                limit=_MAX_SMALL_FILE_BYTES,
+            )
+        )
     return root
+
+
+def _read_cas_object(path: Path, expected_sha256: str, *, limit: int) -> bytes:
+    """Read one content-addressed object through the bounded, link-refusing reader."""
+    data = read_bounded_regular(path, limit=limit)
+    if sha256_bytes(data) != expected_sha256:
+        raise MaterializationError(
+            MaterializationRefusalCode.INPUT_OBJECT_CORRUPT,
+            "a content-addressed object changed after it was admitted",
+        )
+    return data
 
 
 def _view_digest(view: VerifiedWorkerInputs) -> str:
@@ -304,6 +341,33 @@ def _view_digest(view: VerifiedWorkerInputs) -> str:
     return sha256_bytes(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
 
 
+def _pycache_present(runtime: ProtectedRuntime) -> list[str]:
+    """Every ``__pycache__`` directory in the executed runtime roots.
+
+    The closure excludes bytecode, so a `.pyc` added in a measurement window would be
+    imported without changing any digest. The worker cannot create one inside a read-only
+    runtime, so a post-exit entry is a refusal rather than a warning.
+    """
+    found: list[str] = []
+    for root in (runtime.source_root, runtime.site_packages):
+        for current, directories, _files in os.walk(root):
+            for name in list(directories):
+                if name == "__pycache__":
+                    found.append(str(Path(current) / name))
+                    directories.remove(name)
+    return sorted(found)
+
+
+def _model_size_bytes(view: VerifiedWorkerInputs) -> int:
+    """The verified view's model size, from the supervisor's own observation."""
+    for item in view.files:
+        if item.path.startswith("assets/"):
+            return item.size_bytes
+    raise ProtectedLaunchError(
+        RefusalCode.WORKER_START_FAILED, "the verified input view has no model asset entry"
+    )
+
+
 def _view_files(view: VerifiedWorkerInputs) -> tuple[dict[str, object], ...]:
     return tuple(
         {"path": item.path, "size_bytes": item.size_bytes, "sha256": item.sha256}
@@ -311,15 +375,22 @@ def _view_files(view: VerifiedWorkerInputs) -> tuple[dict[str, object], ...]:
     )
 
 
-def consume_binding(route: ProtectedExecutionRoute, nonce: str, binding_sha256: str) -> Path:
-    """Mark one binding as used before process creation; a replay raises.
+def consume_binding(
+    route: ProtectedExecutionRoute, request_sha256: str, staging_root: Path, launch_nonce: str
+) -> Path:
+    """Mark one admitted request in one workspace as used before process creation.
 
-    The marker is supervisor-owned and outside the sandbox-visible tree. It is deliberately
-    not removed after the run: a second use of the same binding is the replay this refuses.
+    The key is the request digest together with the workspace's staging root. A nonce-keyed
+    marker can never collide because every attempt mints a fresh nonce; a request-only marker
+    would wrongly refuse the same scientific request in a second workspace. The pair is the
+    correct identity for "this admission, in this workspace, has already run". The marker is
+    supervisor-owned and outside the sandbox-visible tree, and it is deliberately not removed
+    after the run.
     """
     attempts = route.runtime.registry_root
     attempts.mkdir(parents=True, exist_ok=True)
-    marker = attempts / f"{nonce}.used"
+    key = sha256_bytes(f"{request_sha256}:{staging_root}".encode())
+    marker = attempts / f"{key}.used"
     try:
         descriptor = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError as error:
@@ -327,7 +398,7 @@ def consume_binding(route: ProtectedExecutionRoute, nonce: str, binding_sha256: 
             RefusalCode.WORKER_START_FAILED, "this protected binding was already used"
         ) from error
     with os.fdopen(descriptor, "wb") as handle:
-        handle.write(binding_sha256.encode("ascii"))
+        handle.write(launch_nonce.encode("ascii"))
         handle.flush()
         os.fsync(handle.fileno())
     if os.name != "nt":
@@ -376,7 +447,6 @@ class ProtectedTree:
         cgroup: Any | None = None,
         windows_process: Any | None = None,
     ) -> None:
-        self._platform = platform
         self._process = process
         self._posix = posix
         self._cgroup = cgroup
@@ -389,11 +459,16 @@ class ProtectedTree:
         if self._windows is not None:
             self._windows.kill()
             return
+        # A same-user writer can move a task out of the attempt cgroup, so the POSIX
+        # session is terminated too, and the direct child is killed even if it left both.
         if self._cgroup is not None:
             self._cgroup.kill()
-            return
         if self._posix is not None:
             self._posix.request_termination()
+        try:
+            self._process.kill()
+        except OSError:
+            pass
 
     def wait_empty(self, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
@@ -471,7 +546,7 @@ class ProtectedPlatform:
             self._open_windows()
         else:
             self.principal = _linux_supervisor_principal()
-            _require_linux_mechanisms()
+            _require_linux_mechanisms(self._cgroup_root)
         try:
             self.scratch = resolve_scratch_budget(
                 explicit_root=self._scratch_root,
@@ -726,6 +801,47 @@ class ProtectedPlatform:
         return facts
 
 
+class _LinuxWorkerSampler(threading.Thread):
+    """Capture the protected worker's own `/proc/<pid>/status` once it is ready.
+
+    The supervisor's `Popen` pid is the trusted attach launcher; it applies no_new_privs and
+    seccomp only after the worker execs. Sampling the launcher would either fail every
+    attempt or pass without proving anything about the worker. The bootstrap publishes its
+    own pid in `sandbox-ready.json` before importing the scientific package, and this thread
+    reads that process's status while it is alive.
+    """
+
+    def __init__(self, scratch: Path, facts: dict[str, object]) -> None:
+        super().__init__(daemon=True)
+        self._scratch = scratch
+        self._facts = facts
+        self._stop = threading.Event()
+
+    def run(self) -> None:
+        path = self._scratch / "sandbox-ready.json"
+        deadline = time.monotonic() + 120.0
+        while not self._stop.is_set() and time.monotonic() < deadline:
+            try:
+                raw = read_bounded_regular(path, limit=_MAX_SANDBOX_READY_BYTES)
+                ready = json.loads(raw)
+            except Exception:  # noqa: BLE001 - readiness is polled, not required
+                time.sleep(_POLL_SECONDS)
+                continue
+            pid = ready.get("worker_pid") if isinstance(ready, dict) else None
+            if isinstance(pid, int) and pid > 0:
+                for _ in range(50):
+                    status = _read_proc_status(pid)
+                    if status:
+                        self._facts["worker_proc"] = status
+                        return
+                    if self._stop.wait(_POLL_SECONDS):
+                        return
+                return
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
 def _read_proc_status(pid: int) -> dict[str, object]:
     """Read a process's ``/proc/<pid>/status`` facts the supervisor can verify externally."""
     try:
@@ -760,7 +876,7 @@ def _linux_supervisor_principal() -> dict[str, object]:
     return principal
 
 
-def _require_linux_mechanisms() -> None:
+def _require_linux_mechanisms(cgroup_root: Path | None) -> None:
     from dynamisbench.execution import landlock, seccomp
     from dynamisbench.host import protected_cgroup
 
@@ -781,7 +897,9 @@ def _require_linux_mechanisms() -> None:
             RefusalCode.WORKER_START_FAILED,
             "the seccomp mechanism is unavailable; no unprotected launch is attempted",
         )
-    if not protected_cgroup.cgroup_available():
+    if not protected_cgroup.cgroup_available(cgroup_root):
+        # The availability check must validate the exact root the attempt will use, or a
+        # preflight could approve one delegation and create the subtree in another.
         raise ProtectedLaunchError(
             RefusalCode.WORKER_START_FAILED,
             "the delegated cgroup v2 root or supervisor placement is unavailable; no "
@@ -807,6 +925,7 @@ class ProtectedExecutionRoute:
     runtime: ProtectedRuntime
     platform: ProtectedPlatform
     scratch: ScratchBudget
+    dependency_closure_digest: str
     workspace: Workspace | None = None
 
     @property
@@ -859,8 +978,8 @@ def prepare_protected_route(
         cgroup_root=cgroup_root,
         accept_elevated_windows_residual=accept_elevated_windows_residual,
     )
-    platform.open()
     try:
+        platform.open()
         runtime = prepare_protected_runtime(
             worker_python=worker_python,
             root=platform.runtime_root,
@@ -877,6 +996,7 @@ def prepare_protected_route(
         runtime=runtime,
         platform=platform,
         scratch=platform.scratch,
+        dependency_closure_digest=runtime.environment.dependency_closure_digest,
         workspace=workspace,
     )
 
@@ -888,6 +1008,49 @@ def prepare_protected_route(
 
 def _check(name: str, passed: bool, observed: object, limit: object) -> dict[str, object]:
     return {"name": name, "passed": bool(passed), "observed": observed, "limit": limit}
+
+
+_EXPECTED_PROBE_OUTCOMES: Final = {
+    "allowed_input_read": "allowed",
+    "scratch_write": "allowed",
+    "network_connect": "denied",
+    "network_udp": "denied",
+    "network_raw": "denied",
+    "network_unix": "denied",
+    "network_socketpair": "denied",
+    "io_uring_setup": "denied",
+    "inherited_sockets": "denied",
+    "runtime_write": "denied",
+    "package_model_asset": "denied",
+}
+"""The probe names and expected outcomes the pinned worker must report.
+
+The worker authors the observations, so the supervisor requires the exact set it asked for:
+a worker cannot omit a failing probe, relabel one, or duplicate a passing one.
+"""
+
+
+def expected_probe_outcomes(targets: ProbeTargets) -> dict[str, str]:
+    """The exact probe name to expectation map for one attempt's targets."""
+    expected = dict(_EXPECTED_PROBE_OUTCOMES)
+    for index in range(len(targets.forbidden_reads)):
+        expected[f"forbidden_read_{index}"] = "denied"
+    for index in range(len(targets.forbidden_writes)):
+        expected[f"forbidden_write_{index}"] = "denied"
+    for index in range(len(targets.forbidden_deletes)):
+        expected[f"forbidden_delete_{index}"] = "denied"
+    return expected
+
+
+def _source_entry_digest(runtime: ProtectedRuntime, relative: str) -> str:
+    """The measured SHA-256 of one file in the executed source snapshot."""
+    for entry in runtime.snapshot.source.entries:
+        if entry.path == relative:
+            return entry.sha256
+    raise ProtectedLaunchError(
+        RefusalCode.WORKER_START_FAILED,
+        f"the measured source snapshot has no {relative!r} entry",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -910,6 +1073,9 @@ def correlate_receipt(
     request: WorkerRequest,
     profile: PinnedReferenceProfile,
     runtime: RuntimeExpectation,
+    dependency_closure_digest: str,
+    model_size_bytes: int,
+    expected_probes: dict[str, str],
     windows: bool,
 ) -> tuple[list[dict[str, object]], list[Refusal], dict[str, object]]:
     """Correlate one untrusted worker receipt with the supervisor's own facts.
@@ -943,6 +1109,7 @@ def correlate_receipt(
         )
     correlations: tuple[tuple[str, object, object], ...] = (
         ("receipt_completed", receipt.completed, True),
+        ("receipt_failure_absent", receipt.failure, None),
         ("receipt_mode", receipt.mode, "materialized-mujoco"),
         ("receipt_nonce", receipt.attempt_nonce, binding.launch_nonce),
         ("receipt_run_id", receipt.run_id, str(request.run_id)),
@@ -961,6 +1128,11 @@ def correlate_receipt(
         ("receipt_runtime", receipt.runtime_closure_sha256, runtime.protected_digest),
         ("receipt_profile", receipt.isolation_profile_sha256, profile.digest()),
         ("receipt_engine_imported", receipt.engine_imported, True),
+        (
+            "receipt_dependency_closure",
+            receipt.dependency_closure_digest,
+            dependency_closure_digest,
+        ),
     )
     for name, observed, expected in correlations:
         agrees = observed == expected
@@ -1004,6 +1176,72 @@ def correlate_receipt(
                     "the worker measured a different runtime than the supervisor",
                 )
             )
+    source_paths = tuple(sorted(str(item.get("path", "")) for item in receipt.source_manifest))
+    expected_paths = tuple(sorted(reference.ADAPTER_SOURCE_FILES))
+    source_model = next(
+        (
+            item.get("sha256")
+            for item in receipt.source_manifest
+            if item.get("path") == reference.MODEL_ASSET_PATH
+        ),
+        None,
+    )
+    source_manifest_matches = source_paths == expected_paths and (
+        source_model == profile.model_sha256
+    )
+    checks.append(
+        _check(
+            "receipt_source_manifest",
+            source_manifest_matches,
+            {"paths": len(source_paths), "model_sha256": source_model},
+            {"paths": len(expected_paths), "model_sha256": profile.model_sha256},
+        )
+    )
+    if not source_manifest_matches:
+        refusals.append(
+            refusal(
+                RefusalCode.WORKER_FAILED,
+                "the protected receipt's adapter source manifest is not the accepted closure",
+            )
+        )
+    imports_hold = bool(receipt.imports) and all(item.under_runtime for item in receipt.imports)
+    checks.append(
+        _check(
+            "receipt_imports",
+            imports_hold,
+            [item.module for item in receipt.imports if not item.under_runtime],
+            "every scientific import resolved inside the measured runtime",
+        )
+    )
+    if not imports_hold:
+        refusals.append(
+            refusal(
+                RefusalCode.WORKER_FAILED,
+                "a scientific import resolved outside the worker's measured runtime",
+            )
+        )
+    observed_expectations: dict[str, str] = {}
+    duplicate_probes: list[str] = []
+    for probe in receipt.probes:
+        if probe.name in observed_expectations:
+            duplicate_probes.append(probe.name)
+        observed_expectations[probe.name] = probe.expectation
+    set_matches = observed_expectations == expected_probes and not duplicate_probes
+    checks.append(
+        _check(
+            "receipt_probe_set",
+            set_matches,
+            {"probes": len(receipt.probes), "duplicates": sorted(duplicate_probes)},
+            {"probes": len(expected_probes), "duplicates": []},
+        )
+    )
+    if not set_matches:
+        refusals.append(
+            refusal(
+                RefusalCode.WORKER_FAILED,
+                "the protected receipt does not report exactly the probes the supervisor requested",
+            )
+        )
     gating_failures = [
         probe
         for probe in receipt.probes
@@ -1014,7 +1252,7 @@ def correlate_receipt(
         _check(
             "receipt_probes",
             probes_hold,
-            [probe.name for probe in receipt.probes if not probe.passed],
+            [probe.name for probe in gating_failures],
             "every gating probe observed its expected outcome",
         )
     )
@@ -1036,6 +1274,8 @@ def correlate_receipt(
     else:
         model_matches = (
             receipt.model.sha256 == profile.model_sha256
+            and receipt.model.logical_path == profile.model_source_path
+            and receipt.model.size_bytes == model_size_bytes
             and receipt.model.source == "input_view"
             and not receipt.model.package_asset_present
             and receipt.model.package_asset_probe == "denied"
@@ -1046,6 +1286,8 @@ def correlate_receipt(
                 model_matches,
                 {
                     "sha256": receipt.model.sha256,
+                    "logical_path": receipt.model.logical_path,
+                    "size_bytes": receipt.model.size_bytes,
                     "source": receipt.model.source,
                     "package_asset_present": receipt.model.package_asset_present,
                     "package_asset_probe": receipt.model.package_asset_probe,
@@ -1076,6 +1318,17 @@ def correlate_receipt(
         "observed_trajectory_sha256": physics.trajectory_sha256,
         "matches": physics.trajectory_sha256 == profile.reference_trajectory_sha256,
     }
+    final_time_holds = abs(physics.final_time_s - profile.duration_s) <= _TIME_TOLERANCE_S
+    checks.append(
+        _check("receipt_final_time", final_time_holds, physics.final_time_s, profile.duration_s)
+    )
+    if not final_time_holds:
+        refusals.append(
+            refusal(
+                RefusalCode.WORKER_FAILED,
+                "the protected reference run did not reach the pinned duration",
+            )
+        )
     pinned: tuple[tuple[str, object, object], ...] = (
         ("receipt_steps", physics.steps, profile.steps),
         ("receipt_timestep", physics.timestep_s, profile.timestep_s),
@@ -1204,6 +1457,7 @@ class ProtectedAttempt:
         self.external_isolation: dict[str, object] = route.platform.external_isolation()
         self.checks: list[dict[str, object]] = []
         self.record: ProtectedConsumptionRecord | None = None
+        self._sampler: _LinuxWorkerSampler | None = None
         self.post_runtime_digest: str | None = None
         self.view_after: VerifiedWorkerInputs | None = None
         self.usage: ScratchUsage | None = None
@@ -1220,6 +1474,13 @@ class ProtectedAttempt:
         self.process = process
         self.tree = tree
         self.external_isolation = self.route.platform.external_isolation(process)
+        if not self.route.platform.windows:
+            # `Popen.pid` is the attach launcher, which has not yet applied
+            # ``no_new_privs`` or seccomp. The bootstrap publishes the worker's own pid in
+            # `sandbox-ready.json`, and the sampler captures that process's status while it
+            # is alive. The launcher's status is never used as the isolation fact.
+            self._sampler = _LinuxWorkerSampler(self.scratch, self.external_isolation)
+            self._sampler.start()
         profile = self.route.profile
         watchdog = ScratchWatchdog(
             root=self.scratch,
@@ -1321,7 +1582,14 @@ class ProtectedAttempt:
 
     # -- persistence ----------------------------------------------------------------
     def persist(
-        self, bundle: StagingBundle, *, state: RunLifecycleState, refusals: tuple[Refusal, ...]
+        self,
+        bundle: StagingBundle,
+        *,
+        state: RunLifecycleState,
+        refusals: tuple[Refusal, ...],
+        process_tree_cleaned: bool,
+        stdout_bytes: int,
+        stderr_bytes: int,
     ) -> str:
         """Write the supervisor-authored correlated record into mutable staging.
 
@@ -1339,11 +1607,14 @@ class ProtectedAttempt:
                 "refusals": tuple(item.code.value for item in refusals),
                 "process": {
                     **self.record.process,
+                    # `process_tree_cleaned` is the supervisor's emptiness proof from the
+                    # ownership primitive. `cleanup_failed` additionally reports a primitive
+                    # that could not be released; it is not a substitute for the proof.
                     "tree_cleaned": bool(
-                        self.tree is not None
-                        and not self.tree.cleanup_failed
-                        and self.tree.termination_requested
+                        process_tree_cleaned and (self.tree is None or not self.tree.cleanup_failed)
                     ),
+                    "stdout_bytes": stdout_bytes,
+                    "stderr_bytes": stderr_bytes,
                 },
             }
         )
@@ -1352,16 +1623,21 @@ class ProtectedAttempt:
         return PROTECTED_SUPERVISOR_RECORD_NAME
 
     def cleanup(self) -> None:
-        for sentinel in self.sentinels:
-            sentinel.unlink(missing_ok=True)
-        for path in self.forbidden_writes:
-            path.unlink(missing_ok=True)
+        """Release every resource this attempt owns; never raise, never skip a stage."""
+        for path in (*self.sentinels, *self.forbidden_writes):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                continue
         try:
             self.canary.close()
         except Exception:  # noqa: BLE001 - cleanup is best effort at this boundary
             pass
         if self.watchdog is not None:
-            self.watchdog.stop()
+            try:
+                self.watchdog.stop()
+            except Exception:  # noqa: BLE001
+                pass
         if self.tree is not None:
             try:
                 self.tree.close()
@@ -1423,6 +1699,35 @@ class ProtectedAttempt:
                 )
             )
             return None
+        try:
+            runtime.rescan_for_model()
+            cached = _pycache_present(runtime)
+        except Exception as error:  # noqa: BLE001
+            checks.append(
+                _check("runtime_unchanged", False, type(error).__name__, "the measured snapshot")
+            )
+            refusals.append(
+                refusal(
+                    RefusalCode.FORBIDDEN_PATH,
+                    "the protected runtime gained an unmeasured model or bytecode after exit",
+                )
+            )
+            return None
+        checks.append(
+            _check(
+                "runtime_no_bytecode",
+                not cached,
+                cached,
+                [],
+            )
+        )
+        if cached:
+            refusals.append(
+                refusal(
+                    RefusalCode.FORBIDDEN_PATH,
+                    "the protected runtime gained __pycache__ entries after it was measured",
+                )
+            )
         unchanged = post.digest == runtime.snapshot.digest and runtime.protected_digest == (
             protected_runtime_digest(post, runtime.venv_config_sha256)
         )
@@ -1488,8 +1793,8 @@ class ProtectedAttempt:
         self, checks: list[dict[str, object]], refusals: list[Refusal]
     ) -> None:
         try:
-            data = (self.attempt / "sandbox.json").read_bytes()
-        except OSError as error:
+            data = read_bounded_regular(self.attempt / "sandbox.json", limit=_MAX_SMALL_FILE_BYTES)
+        except Exception as error:  # noqa: BLE001 - an unreadable config is a refusal
             checks.append(
                 _check("sandbox_config_written", False, type(error).__name__, self.sandbox_digest)
             )
@@ -1533,12 +1838,37 @@ class ProtectedAttempt:
         profile = self.route.profile
         runtime = self.route.runtime
         checks.append(_check("sandbox_ready_present", ready is not None, ready, True))
+        sanitized = ready is not None and ready.get("environment_sanitized") is True
         checks.append(
             _check(
                 "environment_sanitized",
-                ready is not None and ready.get("environment_sanitized") is True,
+                sanitized,
                 ready,
                 "the bootstrap replaced the inherited environment before importing",
+            )
+        )
+        if not sanitized:
+            refusals.append(
+                refusal(
+                    RefusalCode.WORKER_FAILED,
+                    "the protected bootstrap did not confirm a sanitized environment",
+                )
+            )
+        # The bootstrap's own allowlist deletes LOCALAPPDATA (a Windows launch requirement)
+        # and PYTHONHASHSEED, so the expected set is the supervisor's environment minus those
+        # two. Anything else is an undeclared key the launch did not authorize.
+        expected_keys = sorted(set(self.environment) - {"LOCALAPPDATA", "PYTHONHASHSEED"})
+        observed_keys = ready.get("environment_keys") if ready is not None else None
+        keys_match = (
+            isinstance(observed_keys, list)
+            and sorted(str(key) for key in observed_keys) == expected_keys
+        )
+        checks.append(
+            _check(
+                "environment_keys",
+                keys_match,
+                None if ready is None else ready.get("environment_keys"),
+                expected_keys,
             )
         )
         bound = (
@@ -1547,6 +1877,7 @@ class ProtectedAttempt:
             and ready.get("runtime_closure_sha256") == runtime.protected_digest
             and ready.get("bootstrap_sha256") == profile.bootstrap_sha256
             and ready.get("config_sha256") == self.sandbox_digest
+            and keys_match
         )
         checks.append(
             _check(
@@ -1556,6 +1887,33 @@ class ProtectedAttempt:
                 "the measured profile, runtime closure, bootstrap and sandbox config",
             )
         )
+        if ready is not None and not self.route.platform.windows:
+            from dynamisbench.execution.seccomp import seccomp_status
+
+            abi = ready.get("abi")
+            control = ready.get("seccomp")
+            seccomp_ok = (
+                isinstance(abi, int)
+                and abi >= 4
+                and isinstance(control, dict)
+                and str(control.get("Seccomp")) == "2"
+                and str(control.get("NoNewPrivs")) == "1"
+            )
+            checks.append(
+                _check(
+                    "sandbox_mechanism",
+                    seccomp_ok,
+                    {"abi": abi, "seccomp": control, "host": seccomp_status()},
+                    "Landlock ABI >= 4, Seccomp=2 and NoNewPrivs=1",
+                )
+            )
+            if not seccomp_ok:
+                refusals.append(
+                    refusal(
+                        RefusalCode.WORKER_FAILED,
+                        "the protected worker did not report the adopted Landlock/seccomp state",
+                    )
+                )
         if ready is None:
             refusals.append(
                 refusal(
@@ -1627,6 +1985,9 @@ class ProtectedAttempt:
             request=self.request,
             profile=profile,
             runtime=expectation,
+            dependency_closure_digest=self.route.dependency_closure_digest,
+            model_size_bytes=_model_size_bytes(self.pre_view),
+            expected_probes=expected_probe_outcomes(self.probe_targets),
             windows=self.route.platform.windows,
         )
         checks.extend(added_checks)
@@ -1634,17 +1995,37 @@ class ProtectedAttempt:
         self.trajectory = trajectory
 
     def _verify_canary(self, checks: list[dict[str, object]], refusals: list[Refusal]) -> None:
+        before = self.canary.cycles
+        drained = True
         try:
             self.canary.drain()
         except Exception:  # noqa: BLE001 - a canary that cannot drain is not evidence
-            pass
+            drained = False
+        # `drain` waits for two listener cycles; a listener thread that already died would
+        # return without them, so the counter, not only the absence of an exception, is the
+        # observation that the canary settled before its traffic was read.
+        drained = drained and self.canary.cycles > before
         observed = {
             "tcp": self.canary.tcp_connections,
             "udp": self.canary.udp_datagrams,
             "unix": self.canary.unix_connections,
         }
-        clean = observed == {"tcp": 0, "udp": 0, "unix": 0}
-        checks.append(_check("network_denied", clean, observed, {"tcp": 0, "udp": 0, "unix": 0}))
+        clean = drained and observed == {"tcp": 0, "udp": 0, "unix": 0}
+        checks.append(
+            _check(
+                "network_denied",
+                clean,
+                {"drained": drained, **observed},
+                {"drained": True, "tcp": 0, "udp": 0, "unix": 0},
+            )
+        )
+        if not drained:
+            refusals.append(
+                refusal(
+                    RefusalCode.WORKER_FAILED,
+                    "the supervision canary could not be drained after exit",
+                )
+            )
         if not clean:
             refusals.append(
                 refusal(
@@ -1705,7 +2086,10 @@ class ProtectedAttempt:
         return usage
 
     def _verify_writes(self, checks: list[dict[str, object]], refusals: list[Refusal]) -> None:
-        unexpected = [str(path) for path in self.forbidden_writes if path.exists()]
+        try:
+            unexpected = [str(path) for path in self.forbidden_writes if path.exists()]
+        except OSError as error:
+            unexpected = [type(error).__name__]
         checks.append(_check("forbidden_writes_absent", not unexpected, unexpected, []))
         if unexpected:
             refusals.append(
@@ -1714,9 +2098,20 @@ class ProtectedAttempt:
                     "the protected worker wrote outside its scratch directory",
                 )
             )
-        runtime_written = self.runtime_write.exists()
+        try:
+            runtime_written = self.runtime_write.exists()
+        except OSError:
+            runtime_written = True
         if runtime_written:
-            self.runtime_write.unlink(missing_ok=True)
+            try:
+                self.runtime_write.unlink(missing_ok=True)
+            except OSError:
+                refusals.append(
+                    refusal(
+                        RefusalCode.FORBIDDEN_PATH,
+                        "a protected runtime write artifact could not be removed",
+                    )
+                )
         checks.append(
             _check(
                 "runtime_write_denied",
@@ -1741,19 +2136,26 @@ class ProtectedAttempt:
                 isinstance(token, dict)
                 and bool(token.get("is_appcontainer"))
                 and bool(token.get("sid_matches"))
+                and int(token.get("capability_count", -1)) == 0
                 and isinstance(job, dict)
             )
             expectation: object = (
-                "an AppContainer token with the expected package SID and a Job Object"
+                "an AppContainer token with the expected package SID, zero capabilities "
+                "and a Job Object"
             )
         else:
-            proc = self.external_isolation.get("proc")
+            if self._sampler is not None:
+                self._sampler.stop()
+            proc = self.external_isolation.get("worker_proc")
             holds = (
                 isinstance(proc, dict)
                 and proc.get("NoNewPrivs") == "1"
+                and str(proc.get("Seccomp")) == "2"
                 and str(proc.get("CapEff", "")).lower() == "0000000000000000"
             )
-            expectation = "NoNewPrivs=1 and zero effective capabilities"
+            expectation = (
+                "the worker process reports NoNewPrivs=1, Seccomp=2 and zero effective capabilities"
+            )
         checks.append(_check("external_isolation", holds, self.external_isolation, expectation))
         if not holds:
             refusals.append(
@@ -1811,6 +2213,7 @@ class ProtectedAttempt:
             worker_selection_sha256=self.binding.worker_selection_sha256,
             launch_nonce=self.binding.launch_nonce,
             bootstrap_sha256=profile.bootstrap_sha256,
+            worker_entry_sha256=_source_entry_digest(runtime, _WORKER_ENTRY_RELATIVE),
             sandbox_config_sha256=self.sandbox_digest,
             runtime_closure_sha256=runtime.protected_digest,
             source_runtime_digest=runtime.source.digest,
@@ -1830,6 +2233,7 @@ class ProtectedAttempt:
             receipt_sha256=None if receipt_bytes is None else sha256_bytes(receipt_bytes),
             receipt_completed=None if receipt is None else receipt.completed,
             receipt_failure=None if receipt is None else receipt.failure,
+            receipt_document=(None if receipt is None else receipt.model_dump(mode="json")),
             receipt=receipt_payload,
             probes=() if receipt is None else tuple(receipt.probes),
             checks=tuple(self.checks),
@@ -1854,8 +2258,8 @@ class ProtectedAttempt:
                 "pid": None if self.process is None else int(self.process.pid),
                 "reaped": bool(self.process is not None and self.process.poll() is not None),
                 "stdin_delivered": stdin_delivered,
-                "stdout_bytes": None,
-                "stderr_bytes": None,
+                "stdout_bytes": 0,
+                "stderr_bytes": 0,
                 "tree_cleaned": False,
             },
             source_runtime=summarize_runtime(runtime.source),
@@ -1994,38 +2398,38 @@ def begin_protected_attempt(
     token = uuid.uuid4().hex
     staging = workspace.location(PersistenceClass.STAGING).path
     sealed = workspace.location(PersistenceClass.SEALED_EVIDENCE).path
-    sentinels: list[Path] = []
-    for root in (
-        staging,
-        sealed,
-        workspace.source_root,
-        runtime.environment.source_root,
-        runtime.registry_root,
-    ):
-        if root.is_dir():
-            sentinels.append(_create_sentinel(root, token))
     # A workspace's sealed root is deliberately absent until a run is sealed, so a write
     # target that does not exist is not part of this attempt's attack surface. Probing a
     # missing directory would report "error", and calling that a denial would be dishonest.
-    forbidden_writes: list[Path] = [inputs / "forbidden-write.txt"]
-    for root in (staging, sealed):
-        if root.is_dir():
-            forbidden_writes.append(root / f"dynamisbench-protected-write-{token}.txt")
-    forbidden_write_targets = tuple(forbidden_writes)
+    forbidden_write_targets: tuple[Path, ...] = (
+        inputs / "forbidden-write.txt",
+        *(
+            root / f"dynamisbench-protected-write-{token}.txt"
+            for root in (staging, sealed)
+            if root.is_dir()
+        ),
+    )
     runtime_write = runtime.source_root / "dynamisbench" / f"protected-write-{token}.txt"
-
-    canary = ProtectedNetworkCanary()
-    control = canary.self_check()
-    if not all(control.values()):
-        canary.close()
-        for sentinel in sentinels:
-            sentinel.unlink(missing_ok=True)
-        shutil.rmtree(attempt, ignore_errors=True)
-        raise ProtectedLaunchError(
-            RefusalCode.WORKER_START_FAILED,
-            "the network canary did not observe its own control traffic",
-        )
+    sentinels: list[Path] = []
+    canary: ProtectedNetworkCanary | None = None
+    succeeded = False
     try:
+        for root in (
+            staging,
+            sealed,
+            workspace.source_root,
+            runtime.environment.source_root,
+            runtime.registry_root,
+        ):
+            if root.is_dir():
+                sentinels.append(_create_sentinel(root, token))
+        canary = ProtectedNetworkCanary()
+        control = canary.self_check()
+        if not all(control.values()):
+            raise ProtectedLaunchError(
+                RefusalCode.WORKER_START_FAILED,
+                "the network canary did not observe its own control traffic",
+            )
         targets = ProbeTargets(
             forbidden_reads=tuple(str(path) for path in sentinels),
             forbidden_writes=tuple(str(path) for path in forbidden_write_targets),
@@ -2063,14 +2467,32 @@ def begin_protected_attempt(
             environment = protected_environment(scratch)
         except ProtectedRuntimeError as error:
             raise ProtectedLaunchError(RefusalCode.WORKER_START_FAILED, str(error)) from error
-    except BaseException:
-        canary.close()
-        for sentinel in sentinels:
-            sentinel.unlink(missing_ok=True)
-        shutil.rmtree(attempt, ignore_errors=True)
+        # The binding is consumed last, inside the managed scope, so a failure above leaves
+        # the admitted request re-usable and a failure below has already unwound.
+        consume_binding(route, binding.request_sha256, staging, binding.launch_nonce)
+        succeeded = True
+    except ProtectedLaunchError:
         raise
+    except Exception as error:  # noqa: BLE001 - every refusal is bounded, never an escape
+        raise ProtectedLaunchError(
+            RefusalCode.WORKER_START_FAILED,
+            f"the protected attempt could not be prepared: {type(error).__name__}",
+        ) from error
+    finally:
+        if not succeeded:
+            for sentinel in sentinels:
+                try:
+                    sentinel.unlink(missing_ok=True)
+                except OSError:
+                    continue
+            if canary is not None:
+                try:
+                    canary.close()
+                except Exception:  # noqa: BLE001 - cleanup is best effort
+                    pass
+            shutil.rmtree(attempt, ignore_errors=True)
 
-    consume_binding(route, binding.launch_nonce, binding_sha256)
+    assert canary is not None
     return ProtectedAttempt(
         route=route,
         request=request,

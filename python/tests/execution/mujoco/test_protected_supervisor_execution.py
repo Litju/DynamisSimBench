@@ -13,6 +13,7 @@ They are not a production activation: the route is only reachable by passing a
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from typing import Any
 import pytest
 
 from dynamisbench.adapters.mujoco import reference
+from dynamisbench.adapters.mujoco.protected_contracts import ConsumptionReceipt
 from dynamisbench.evidence.bundle import RunOutcome
 from dynamisbench.execution import (
     PreparedExecutionInputs,
@@ -163,6 +165,30 @@ def test_the_protected_route_completes_inside_the_supervisor(
     assert all(bool(check["passed"]) for check in record.checks), [
         check for check in record.checks if not check["passed"]
     ]
+    check_names = {str(check["name"]) for check in record.checks}
+    assert {
+        "environment_keys",
+        "receipt_source_manifest",
+        "receipt_imports",
+        "receipt_failure_absent",
+        "receipt_final_time",
+        "receipt_dependency_closure",
+        "input_view_unchanged",
+        "runtime_unchanged",
+        "bootstrap_pinned",
+        "scratch_within_limit",
+        "external_isolation",
+        "network_denied",
+    } <= check_names
+    assert record.process["tree_cleaned"] is True
+    assert len(record.worker_entry_sha256) == 64
+    # The persisted record carries the worker's full untrusted receipt, so its digest is
+    # recomputable from the artifact rather than only asserted.
+    assert record.receipt_document is not None
+    from dynamisbench.identity import canonical_semantic_bytes as canonical
+
+    receipt_bytes = canonical(ConsumptionReceipt.model_validate(record.receipt_document))
+    assert hashlib.sha256(receipt_bytes).hexdigest() == record.receipt_sha256
 
     receipt = record.receipt
     assert receipt is not None
@@ -275,8 +301,9 @@ def test_a_resource_bound_violation_refuses_the_attempt(
         profile=protected_route.profile.model_copy(update={"max_scratch_entries": 1}),
         runtime=protected_route.runtime,
         platform=protected_route.platform,
-        workspace=protected_route.workspace,
         scratch=protected_route.scratch,
+        dependency_closure_digest=protected_route.dependency_closure_digest,
+        workspace=protected_route.workspace,
     )
     selection, prepared = _prepare(fixture, mujoco_identity)
     admission = _admission(fixture, selection)

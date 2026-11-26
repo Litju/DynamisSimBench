@@ -53,7 +53,6 @@ __all__ = [
 _MODEL_ASSET = "assets/reference_pendulum.xml"
 _MODEL_SOURCE_RELATIVE = "dynamisbench/adapters/mujoco/assets/reference_pendulum.xml"
 _BOOTSTRAP_RELATIVE = "dynamisbench/execution/protected_bootstrap.py"
-_WORKER_RELATIVE = "dynamisbench/adapters/mujoco/protected_worker.py"
 _SANDBOX_SCHEMA = "dynamisbench.protected.sandbox/1"
 _MAX_CONFIG_BYTES: Final = 256 * 1024
 
@@ -78,6 +77,7 @@ class RuntimeEnvironment:
     base_prefix: Path
     site_packages: Path
     source_root: Path
+    dependency_closure_digest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,11 +222,13 @@ def _run_environment_probe(worker_python: Path) -> RuntimeEnvironment:
     """
     script = (
         "import json,sys;"
+        "from dynamisbench.adapters.mujoco import dependencies;"
         "print(json.dumps({"
         "'executable':sys.executable,"
         "'base_prefix':sys.base_prefix,"
         "'prefix':sys.prefix,"
-        "'site_packages':[p for p in sys.path if p.endswith('site-packages')]"
+        "'site_packages':[p for p in sys.path if p.endswith('site-packages')],"
+        "'dependency_closure':dependencies.installed_closure().digest"
         "}))"
     )
     environment = {
@@ -279,6 +281,11 @@ def _run_environment_probe(worker_python: Path) -> RuntimeEnvironment:
     ):
         if not path.exists():
             raise ProtectedRuntimeError(f"the worker environment {label} is absent")
+    closure_digest = value.get("dependency_closure")
+    if not isinstance(closure_digest, str):
+        raise ProtectedRuntimeError(
+            "the worker environment probe did not report its dependency closure"
+        )
     return RuntimeEnvironment(
         executable=launch_executable,
         resolved_executable=resolved_executable,
@@ -286,14 +293,23 @@ def _run_environment_probe(worker_python: Path) -> RuntimeEnvironment:
         base_prefix=base_prefix,
         site_packages=site_packages,
         source_root=source_root,
+        dependency_closure_digest=closure_digest,
     )
 
 
 def _system32_tool(name: str) -> str:
-    root = os.environ.get("SYSTEMROOT") or os.environ.get("SystemRoot") or "C:/Windows"
-    candidate = Path(root) / "System32" / name
+    """Resolve a privileged helper from the kernel's system directory, not the environment."""
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(261)
+    length = ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
+    if length == 0 or length >= len(buffer):
+        raise ProtectedRuntimeError("the Windows system directory could not be resolved")
+    candidate = Path(buffer.value) / name
     if not candidate.is_file():
-        raise ProtectedRuntimeError(f"the system tool {name!r} is not present in System32")
+        raise ProtectedRuntimeError(
+            f"the system tool {name!r} is not present in the system directory"
+        )
     return str(candidate)
 
 
@@ -554,6 +570,14 @@ def prepare_protected_runtime(
     )
 
 
+def _source_closure_digest(runtime: ProtectedRuntime, relative: str) -> str:
+    """The measured SHA-256 of one file in the executed source snapshot."""
+    for entry in runtime.snapshot.source.entries:
+        if entry.path == relative:
+            return entry.sha256
+    raise ProtectedRuntimeError(f"the measured source snapshot has no {relative!r} entry to pin")
+
+
 def build_protected_sandbox_config(
     *,
     profile: PinnedReferenceProfile,
@@ -588,7 +612,13 @@ def build_protected_sandbox_config(
         "installed_source_root": str(runtime.environment.source_root),
         "keep_paths": [str(runtime.base_prefix)],
         "landlock_module": str(source_root / "dynamisbench/execution/landlock.py"),
+        "landlock_module_sha256": _source_closure_digest(
+            runtime, "dynamisbench/execution/landlock.py"
+        ),
         "seccomp_module": str(source_root / "dynamisbench/execution/seccomp.py"),
+        "seccomp_module_sha256": _source_closure_digest(
+            runtime, "dynamisbench/execution/seccomp.py"
+        ),
         "read_execute": list(read_execute),
         "read_only": list(read_only),
         "read_write": list(read_write),

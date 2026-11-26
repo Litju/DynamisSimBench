@@ -7,22 +7,23 @@ the default remains the diagnostic worker. RES-555 stays In Review. ADR-027 nati
 and sealing are untouched.
 
 This record replaces planning with the observed execution. It is the increment the
-`production-increment.md` design described, implemented and measured.
+`production-increment.md` design described, implemented, measured, and then revised in
+response to two independent adversarial reviews.
 
 ## 1. What was built
 
 | Layer | Module | What it owns |
 |---|---|---|
 | Profile | `execution/protected_profile.py` | the frozen pinned-reference profile and both accepted adapter digests |
-| Runtime | `execution/protected_runtime.py` | measured snapshot, packaged-XML removal, Linux `pyvenv.cfg` measurement, `-I -S` command vector, minimal environment |
-| Bootstrap | `execution/protected_bootstrap.py` | config and self verification, environment reduction, rlimits, Landlock + seccomp, readiness echo, fixed `sys.path` |
+| Runtime | `execution/protected_runtime.py` | measured snapshot, packaged-XML removal, Linux `pyvenv.cfg` measurement, worker dependency closure, `-I -S` command vector, minimal environment |
+| Bootstrap | `execution/protected_bootstrap.py` | config and self verification, environment reduction, rlimits, digest-pinned Landlock + seccomp, readiness echo, fixed `sys.path` |
 | Contracts | `adapters/mujoco/protected_contracts.py` | runtime closure measurement, view verification, untrusted receipt model, probe observations |
 | Worker | `adapters/mujoco/protected_worker.py` | production authority check, view compile with `physics.compile_model`, pinned 2,000 steps, bounded receipt |
-| Host (Windows) | `host/protected_windows.py` | AppContainer profile, Job Object, token observation, **non-elevated principal gate** |
+| Host (Windows) | `host/protected_windows.py` | AppContainer profile, Job Object, token observation, **non-elevated principal gate**, kernel-resolved system tools |
 | Host (Linux) | `host/protected_cgroup.py` | delegated cgroup v2 subtree, attach-before-exec, `cgroup.kill`, `populated` emptiness |
-| Canary | `host/protected_canary.py` | TCP/UDP/Unix canaries with a post-exit drain |
+| Canary | `host/protected_canary.py` | TCP/UDP/Unix canaries with a cycle-counted post-exit drain |
 | Scratch | `execution/protected_scratch.py` | entry/byte accounting, directory and NTFS-stream counts, sampled watchdog |
-| Launcher | `execution/protected_launch.py` | route, attempt, view, sandbox policy, single-use binding, correlation, `protected-consumption.json` |
+| Launcher | `execution/protected_launch.py` | route, attempt, view, sandbox policy, single-use admission marker, correlation, `protected-consumption.json` |
 | Supervision | `execution/supervisor.py` | `execute_preflighted(..., protected=ProtectedRun)` |
 
 The probe harness now imports the production host mechanisms through thin re-exports, so its
@@ -31,64 +32,119 @@ qualified observations exercise the same AppContainer and cgroup code the route 
 ## 2. Lifecycle guarantees preserved
 
 - **Admission is unchanged and re-derived** immediately before staging and again before
-  launch. A protected attempt re-checks the pinned authority tuple (adapter and
-  implementation digest, all five definition identities and semantic digests, environment,
-  seed, outcome, single gravity factor, duration, timestep and steps) before a process.
+  launch. The pinned authority tuple is checked before a process: adapter and implementation
+  digest, all five definition identities and semantic digests, environment identity, seed,
+  outcome, the single gravity factor (id, quantity, unit, target, value), protocol version
+  and capabilities. Duration, timestep and step count are bound pre-process by the scenario
+  semantic digest and compared numerically against the profile after the run.
 - **Bounded IPC is the existing one.** One canonical request through the bounded writer, one
   bounded stdout response, one bounded stderr log, one deadline, one cancellation path.
-- **The tree is the mechanism.** `_terminate_and_reap` now accepts either the Job Object or
-  the cgroup subtree and treats both timeout exceptions identically; emptiness is proved by
-  the primitive, never by reaping the direct child.
-- **The binding is single-use.** The marker is created with `O_EXCL` and fsynced (plus a
-  directory fsync on POSIX) before `CreateProcess`/`exec`; a replay is a refusal.
+  For a protected attempt the deadline is `min(manifest timeout, profile wall clock)` and the
+  output bounds are the profile's, so a longer diagnostic manifest cannot widen them.
+- **The tree is the mechanism.** `_terminate_and_reap` accepts either the Job Object or the
+  cgroup subtree. On Linux the route requests `cgroup.kill`, the POSIX session kill and a
+  direct-child kill, and requires both the cgroup and the session to be empty; a subtree that
+  cannot be released is a terminal refusal.
+- **The admission marker is single-use.** It is keyed by the request digest *and* the
+  workspace staging root, created with `O_EXCL` and fsynced (plus a directory fsync on POSIX)
+  before `CreateProcess`/`exec`. A run-level replay is refused by the staging bundle before
+  any attempt exists.
 - **The runtime is revalidated three times** — after route preparation, immediately before
-  launch, and after exit — plus the bootstrap digest against the profile and, on Linux, the
-  selected `pyvenv.cfg`. The view is verified before launch and after exit.
+  launch, and after exit — plus the bootstrap digest against the profile, the Linux
+  `pyvenv.cfg`, a post-exit packaged-model rescan, and a post-exit `__pycache__` refusal.
+  The view is verified before launch and after exit.
 - **The receipt is untrusted.** `scratch/consumption.json` is parsed, canonicality-checked,
   and correlated with the supervisor's own measurement of the nonce, binding, request,
   preflight, manifest, environment, selection, adapter, runtime closure, profile, runtime
-  roots, model bytes, step count, stability and the committed trajectory.
+  roots, the exact probe set and expectations, the adapter source manifest, the worker
+  dependency closure, the scientific imports, the model path/size/digest, the achieved step
+  count, duration, stability and the committed trajectory.
 - **No fallback exists.** A missing mechanism, an elevated Windows principal, a missing
   delegated cgroup, a shared scratch volume on Linux, a changed view, a changed runtime, a
-  consumed binding, a missing or mismatched receipt, a scratch overrun and a canary
+  consumed admission, a missing or mismatched receipt, a scratch overrun and a canary
   connection are all refusals or failed terminals. No path starts an unsandboxed worker.
 
-## 3. Observed end-to-end execution (Windows, exact local head)
+## 3. Observed end-to-end execution (Windows, exact tree of this document)
 
 | Fact | Observation |
 |---|---|
 | Principal | non-elevated supervisor: `elevated=false`, `elevation_type=3`, integrity `S-1-16-8192`, 0 capabilities |
 | Worker token | AppContainer, package SID matched, low integrity `S-1-16-4096`, 0 capabilities, 2 privileges |
-| Mechanism | `windows-appcontainer`; Job Object accounting; tree verified empty |
-| Result | `COMPLETED`, 0 refusals, exit 0, stdin delivered, reaped, tree cleaned |
-| Supervisor checks | 45 / 45 passed |
-| Inside-worker probes | 18 recorded; the 5 documented Windows-informational observations (UDP sendto, AF_UNIX, socketpair, io_uring, inherited-socket walk) are excluded from the gate and every gating probe observed its denial |
-| Model | `eac679a7…` from the verified view, packaged XML absent (`denied`) |
-| Reference | 2,000 steps, trajectory `f585292d…`, final angle/velocity and both energies equal to the committed reference |
-| Runtime | supervisor snapshot == post-exit measurement == worker measurement (`2cc9ffb8…`) |
-| View | before == after (`d63602d2…`) |
-| Scratch | 4 entries / 4 files / 9,020 bytes, 0 links, watchdog 989 samples, not triggered (`sampled-watchdog`) |
-| Persisted record | `protected-consumption.json`, `dynamisbench.protected-consumption/1` |
-| Retained artifact | `evidence/RES-555/gate-b2/protected-supervisor/windows-x86-64.json`, SHA-256 `a879672fab2e8177a3a217aedf3f7e1eb2080f2c7f326aebec092d467d4ef8aa` |
+| Mechanism | `windows-appcontainer`; Job Object accounting; tree verified empty and released |
+| Result | `COMPLETED`, 0 refusals, exit 0, stdin delivered, reaped, `process_tree_cleaned=True` |
+| Supervisor checks | **53 / 53 passed** |
+| Inside-worker probes | 18 recorded and required as an exact set; the 5 documented Windows-informational observations (UDP sendto, AF_UNIX, socketpair, io_uring, inherited-socket walk) are excluded from the gate and every gating probe observed its **expected** outcome |
+| Model | `eac679a7…` from the verified view, packaged XML absent **from the sandbox snapshot** (`denied`) |
+| Reference | 2,000 steps, trajectory `f585292d…`, final angle/velocity and both energies equal to the committed reference; achieved final time within 1e-12 s of 2.0 s |
+| Runtime identity | supervisor snapshot == post-exit measurement (`205cf15e…`) |
+| Runtime closure | supervisor, worker and receipt agree (`a6c12cd7…`) |
+| View | before == after (`b020fd42…`) |
+| Dependency closure | worker-reported closure equals the closure measured from the worker interpreter (`6a2f7ad6…`) |
+| Scratch | 4 entries / 4 files / 9,038 bytes, 0 links, watchdog 745 samples, not triggered (`sampled-watchdog`) |
+| Persisted record | `protected-consumption.json`, `dynamisbench.protected-consumption/1`, carrying the full untrusted receipt so its digest is recomputable |
+| Retained artifact | `evidence/RES-555/gate-b2/protected-supervisor/windows-x86-64.json` |
 
-Negative and boundary tests that ran on the same tree: protected timeout (`TIMED_OUT`,
-tree cleaned, no success seal), pre-set cancellation (`CANCELED`), resource-bound violation
+Negative and boundary tests that ran on the same tree: protected timeout (`TIMED_OUT`, tree
+cleaned, no success seal), pre-set cancellation (`CANCELED`), resource-bound violation
 (scratch entry bound), altered C A S input bytes (refused before any process), altered
 runtime bytes (refused before any process), prepared inputs for another request (refused
-before any process), replayed binding (refused), and the pinned profile rejecting a foreign
-admitted request.
+before any process), replayed admission marker (refused), a foreign admitted request refused
+by the profile, and receipt substitution across nonce, trajectory, runtime roots, source
+manifest, dependency closure, imports, duration, failure text and probe set.
 
-The first real supervisor run also found four defects the probe could not reach, all fixed
-with regression tests in `7e23ce9`: the bootstrap did not consume its own digests, the
-AppContainer `CreateProcess` path requires `LOCALAPPDATA` in a caller-supplied environment
-block, a minimal environment hid `PROCESSOR_ARCHITECTURE` from `platform.machine()`, and a
-corrupt C A S object escaped as an exception instead of a refusal.
+The first real supervisor run found four defects the probe could not reach, all fixed with
+regression tests: the bootstrap did not consume its own digests, the AppContainer
+`CreateProcess` path requires `LOCALAPPDATA` in a caller-supplied environment block, a
+minimal environment hid `PROCESSOR_ARCHITECTURE` from `platform.machine()`, and a corrupt
+C A S object escaped as an exception instead of a refusal.
 
-## 4. Linux status
+## 4. Review dispositions
+
+Two independent adversarial reviews read the exact tree (`ef5c317` plus the revisions that
+produce this document): a security/runtime review and a scientific/evidentiary review. They
+are **not** the human sign-off the owner requires.
+
+Fixed in response:
+
+- Linux external isolation sampled the attach launcher rather than the worker; the worker now
+  publishes its own pid and the supervisor samples that process's `NoNewPrivs=1`,
+  `Seccomp=2` and zero capabilities. Landlock ABI and seccomp state are gates, not echoes.
+- A cgroup escape could report an empty tree and leave a session descendant; termination now
+  kills the cgroup, the session and the direct child, and requires both primitives empty.
+- The admission marker could never collide; it is now keyed by the request and workspace.
+- Cleanup was not guaranteed on several early-return paths; one managed scope now unwinds
+  every resource, and cleanup never raises.
+- Refusal conditions could escape as exceptions; `begin_protected_attempt`, `observe` and
+  the persist path now convert them to bounded terminal refusals.
+- The probe gate trusted worker-authored probe names and expectations; the supervisor now
+  requires the exact probe set it requested and refuses duplicates or relabelling.
+- A completed receipt could carry a failure string; that is now refused.
+- The source manifest, dependency closure, scientific imports, model path/size and achieved
+  duration are now compared against supervisor-held values.
+- `environment_sanitized` could be recorded false without a refusal; it is now a refusal.
+- The canary drain is confirmed by its cycle counter, not only by the absence of an exception.
+- System tools are resolved from the kernel system directory, not `%SYSTEMROOT%`, and the
+  availability check uses the route's explicit cgroup root.
+- A post-exit `__pycache__` or packaged model is now a refusal.
+
+Recorded as accepted residuals rather than fixed:
+
+- **The supervisor does not re-execute the physics.** The trajectory comparison is against
+  the committed reference; a hostile replacement worker could fabricate a canonical receipt.
+  The pinned adapter is trusted code, not an independent oracle.
+- **A same-user writer is detection, not prevention.** The DACL and the pre/post hashes
+  reduce and detect substitution; they do not make the supervisor user unable to rewrite a
+  tree it owns.
+- **The base installation's `bin`/`Scripts` and base site-packages are excluded from the base
+  closure** but remain inside the worker's read-execute tree on both platforms.
+- **Windows network denial is the measured-paths claim**, and the informational probes record
+  it as such.
+
+## 5. Linux status
 
 The Linux path is the same launcher with the adopted Landlock ABI >= 4 + seccomp +
-delegated cgroup v2 + dedicated scratch mechanism, and now adds the measured `pyvenv.cfg`
-to the read allowlist and re-verifies it after exit (finding F7's launcher half). It cannot
+delegated cgroup v2 + dedicated scratch mechanism, the digest-pinned sandbox modules, the
+measured `pyvenv.cfg` in the read allowlist, and the worker-pid isolation sampler. It cannot
 be qualified on this host. The CI job runs
 `tests/execution/mujoco/test_protected_supervisor_execution.py` inside the delegated cgroup
 with `DYNAMISBENCH_REQUIRE_PROTECTED_ROUTE=1`, so an unavailable mechanism fails the job
@@ -96,35 +152,30 @@ instead of skipping. The hosted Windows runner is elevated, so its job asserts t
 non-elevated gate refuses rather than claiming an unqualified execution; the qualified
 Windows observation above is from a non-elevated local principal.
 
-## 5. Remaining activation blockers
+## 6. Remaining activation blockers, mapped to the owner record §3
 
-No production route is activated. The following are still open, and the owner's conditional
-requirements are not satisfied by this record:
+| Owner condition | Status |
+|---|---|
+| F1 bootstrap closure | **implemented**: bootstrap is a source file, hashed in the profile, verified by the bootstrap and re-verified after exit |
+| F2 sandbox policy pinning | **implemented**: config bytes pinned by digest, module paths and digests pinned, modules executed from verified bytes |
+| F3 pre-sandbox startup | **implemented**: `-I -S`, minimal supervisor environment, exact key-set gate; `LOCALAPPDATA` is a documented Windows `CreateProcess` requirement removed by the bootstrap |
+| F4 scratch accounting | **implemented**: directories, entries and NTFS streams counted; entry budget drives the watchdog; post-exit fail-closed |
+| F5 pinned request authority | **implemented**: the production `_verify_reference_authority` runs before compile, and the profile compares the same tuple |
+| F6 canary drain | **implemented**: two-cycle drain confirmed by the cycle counter |
+| F7 Linux venv closure | **implemented**: `pyvenv.cfg` measured, in the read allowlist, re-verified by the worker and after exit |
+| #8 adapter identity including worker/bootstrap | **NOT satisfied**: the accepted digests remain the 10-file B2 manifest. The bootstrap is profile-pinned and the worker entry is in the runtime source closure and recorded as `worker_entry_sha256`, but the owner's requested manifest change is a new acceptance decision that this increment does not make |
+| #9 non-elevated Windows principal | **implemented as a gate**; **unqualified on hosted CI**, which is elevated |
+| #10 comparator/reference quality | **partly**: the supervisor compares the pinned numerics; the profile does not load `reference-observation.json`, and a test asserting profile == committed reference is still absent |
+| #11 stack reconciliation (F8/F9) | **open**: #31–#35 are behind current main and need merge-commit updates and exact-head re-qualification |
+| #12 independent human review | **open**: `independent-review.md` is blank. The two adversarial reviews above are not that sign-off |
+| #13 ADR-027 | **unchanged**: proposed; no native output, canonicalization, assessment or seal |
 
-1. **Named human review.** `independent-review.md`'s signature block is still blank. This
-   record and any automated review are not that sign-off.
-2. **Qualified non-elevated Windows principal in CI.** The hosted runner is elevated. A
-   non-elevated runner, or an explicit owner residual acceptance that re-qualifies the
-   elevated principal, is required.
-3. **Exact-head Windows and Linux CI on the final stack head**, with the eight ADR-025
-   checks plus the B2 and MuJoCo receipt comparisons.
-4. **Stack reconciliation (F8/F9).** #31–#35 are still behind current main; each layer must
-   be updated with merge commits and re-qualified at the merge SHA.
-5. **Linux cgroup and scratch provisioning** are host facts, not code: a delegated leaf
-   cgroup with `pids`/`memory` controllers, the supervisor placed in a child of it, and a
-   dedicated scratch mount at or below the 64 MiB bound.
-6. **Aggregate scratch prevention.** The Windows route records `sampled-watchdog`; the
-   adopted claim is detection, not a kernel quota. A dedicated volume is the Linux
-   mechanism. No aggregate quota is claimed on a shared Windows volume.
-7. **UDP/raw/Unix network scope on Windows** remains the measured-paths claim, not a
-   universal denial. The five informational probes record that honestly.
-8. **ADR-027** remains proposed: no native extraction, canonicalization, assessment or
-   seal is activated, and `protected-consumption.json` is a staging diagnostic, not evidence.
+Additional open items not owned by the owner record: the Linux qualification result, the
+`__pycache__`-free base-installation surface (residual), a Windows network claim beyond the
+measured paths, and a kernel-enforced aggregate scratch quota on a shared volume.
 
-## 6. What this record is not
+## 7. What this record is not
 
-It is not an acceptance of D3/D4, not a re-acceptance of the adapter identity beyond the
-conditional owner record, not a merge authorization, and not a scientific verdict. The
-trajectory comparison is against the committed RES-550-derived reference; the supervisor
-does not independently re-execute the physics, and the pinned adapter is trusted code rather
-than an independent oracle.
+It is not an acceptance of D3/D4, not a re-acceptance of the adapter identity, not a merge
+authorization, and not a scientific verdict. It does not activate ADR-027. The retained
+record is a staging diagnostic authored by the supervisor, not native evidence.
